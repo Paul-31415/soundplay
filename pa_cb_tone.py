@@ -1,13 +1,14 @@
 """make a tone"""
 
+import code
 import pyaudio
-import wave
-import time
 import sys
+import time
+import wave
 from math import pi
 import numpy as np
 
-class Osc:
+class FeynmanOsc:
     def __init__(self, w):
         self.w = w
         self.cos = 1.0 - 0.5*self.w
@@ -21,6 +22,10 @@ class Osc:
         self.sin += self.cos * w
         self.cos -= self.sin * w
         return self.sin
+
+class Osc(FeynmanOsc):
+    def __init__(self, f):
+        FeynmanOsc.__init__(self, f*2*pi / 48000)
 
 def gain(it, g):
     for v in it:
@@ -38,6 +43,8 @@ def yield_n_scaled(it, n, sf=1.0):
     for i in range(n):
         yield next(it) * sf
 
+class Thing:
+    pass
 
 class OA:
     def __init__(self, bytes_per_sample):
@@ -62,18 +69,19 @@ def main(argv):
     # instantiate PyAudio (1)
     p = pyaudio.PyAudio()
 
-    o1 = Osc(float(argv[1]) * 2*pi / 48000)
-    o2 = Osc(float(argv[2]) * 2*pi / 48000)
-    o3 = Osc(float(argv[3]) * 2*pi / 48000)
+    o1 = Osc(float(argv[1]))
+    o2 = Osc(float(argv[2]))
+    o3 = Osc(float(argv[3]))
 
-    mix = prod(gain(add(o1, o2), 0.5), o3)
+    mix = Thing()
+    mix.out = prod(gain(add(o1, o2), 0.5), o3)
 
     adapter = OA(2)
 
     # define callback (2)
     def callback(in_data, frame_count, time_info, status):
         #data = wf.readframes(frame_count)
-        data = adapter.get_n(mix, frame_count)
+        data = adapter.get_n(mix.out, frame_count)
         #print(frame_count, time_info, status, end=': ')
         #print(' '.join('%02x%02x' % (data[2*i], data[2*i+1]) for i in range(10)))
         return (data, pyaudio.paContinue)
@@ -89,11 +97,16 @@ def main(argv):
     stream.start_stream()
 
     # wait for stream to finish (5)
-    try:
-        while stream.is_active():
-            time.sleep(0.1)
-    except KeyboardInterrupt:
-        pass
+    #try:
+    #    while stream.is_active():
+    #        time.sleep(0.1)
+    #except KeyboardInterrupt:
+    #    pass
+
+    # Get a repl to facilitate live modifications
+    d = globals()
+    d.update(locals())
+    code.interact(banner='Hack away!', local=d, exitmsg='bye')
 
     # stop stream (6)
     stream.stop_stream()
