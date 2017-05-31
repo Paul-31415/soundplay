@@ -24,7 +24,7 @@ class Osc:
 
 def gain(it, g):
     for v in it:
-        yield g * it
+        yield g * next(it)
 
 def add(o1, o2):
     while True:
@@ -62,15 +62,18 @@ def main(argv):
     # instantiate PyAudio (1)
     p = pyaudio.PyAudio()
 
-    osc = Osc(float(argv[1]) * 2*pi / 48000)
-    osc2 = Osc(float(argv[2]) * 2*pi / 48000)
+    o1 = Osc(float(argv[1]) * 2*pi / 48000)
+    o2 = Osc(float(argv[2]) * 2*pi / 48000)
+    o3 = Osc(float(argv[3]) * 2*pi / 48000)
+
+    mix = prod(gain(add(o1, o2), 0.5), o3)
 
     adapter = OA(2)
 
     # define callback (2)
     def callback(in_data, frame_count, time_info, status):
         #data = wf.readframes(frame_count)
-        data = adapter.get_n(osc, frame_count)
+        data = adapter.get_n(mix, frame_count)
         #print(frame_count, time_info, status, end=': ')
         #print(' '.join('%02x%02x' % (data[2*i], data[2*i+1]) for i in range(10)))
         return (data, pyaudio.paContinue)
