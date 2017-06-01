@@ -1,10 +1,22 @@
 """make a tone"""
 
+help_message = """Audio hackery: a generator you compose feeds the audio output.
+Assign your generator to mix.out, e.g.:
+
+mix.out = cycle(v/100 for v in range(-100,100)) # Play a sawtooth
+mix.out = Osc(440) # Play A below middle C at full volume
+mix.out = gain(Osc(660), 0.1) # play G 20db down
+o1, o2, o3, o4 = Osc(440), Osc(550), Osc(660), Osc(0.3)
+mix.out = prod(gain(add(add(o1, o2), o3), 1/3), o4)
+mix.out = mute     # Play 0's continuously
+"""
+
 import code
 import pyaudio
 import sys
 import time
 import wave
+from itertools import *
 from math import pi
 import numpy as np
 
@@ -25,6 +37,7 @@ class FeynmanOsc:
 
 class Osc(FeynmanOsc):
     def __init__(self, f):
+        self.freq = f
         FeynmanOsc.__init__(self, f*2*pi / 48000)
 
 def gain(it, g):
@@ -38,6 +51,10 @@ def add(o1, o2):
 def prod(o1, o2):
     while True:
         yield next(o1) * next(o2)
+
+def zeros():
+    while True:
+        yield 0
 
 def yield_n_scaled(it, n, sf=1.0):
     for i in range(n):
@@ -57,24 +74,18 @@ class OA:
         rv = a.tobytes()
         return rv
 
-
+def help():
+    print(help_message)
 
 def main(argv):
-    if len(argv) < 2:
-        print("Plays a tone.\n\nUsage: %s freq" % argv[0])
-        sys.exit(-1)
-
     #wf = wave.open(argv[1], 'rb')
 
     # instantiate PyAudio (1)
     p = pyaudio.PyAudio()
 
-    o1 = Osc(float(argv[1]))
-    o2 = Osc(float(argv[2]))
-    o3 = Osc(float(argv[3]))
-
+    mute = zeros()
     mix = Thing()
-    mix.out = prod(gain(add(o1, o2), 0.5), o3)
+    mix.out = mute
 
     adapter = OA(2)
 
@@ -106,7 +117,7 @@ def main(argv):
     # Get a repl to facilitate live modifications
     d = globals()
     d.update(locals())
-    code.interact(banner='Hack away!', local=d, exitmsg='bye')
+    code.interact(banner=help_message, local=d, exitmsg='bye')
 
     # stop stream (6)
     stream.stop_stream()
