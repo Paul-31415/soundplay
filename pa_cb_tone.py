@@ -7,7 +7,7 @@ mix.out = cycle(v/100 for v in range(-100,100)) # Play a sawtooth
 mix.out = Osc(440) # Play A below middle C at full volume
 mix.out = gain(Osc(660), 0.1) # play G 20db down
 o1, o2, o3, o4 = Osc(440), Osc(550), Osc(660), Osc(0.3)
-mix.out = prod(gain(add(add(o1, o2), o3), 1/3), o4)
+mix.out = prod(gain(add(o1, o2, o3), 1/3), o4)
 mix.out = mute     # Play 0's continuously
 """
 
@@ -44,9 +44,9 @@ def gain(it, g):
     for v in it:
         yield g * next(it)
 
-def add(o1, o2):
+def add(*its):
     while True:
-        yield next(o1) + next(o2)
+        yield sum(next(it) for it in its)
 
 def prod(o1, o2):
     while True:
