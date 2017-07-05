@@ -40,6 +40,16 @@ class Osc(FeynmanOsc):
         self.freq = f
         FeynmanOsc.__init__(self, f*2*pi / 48000)
 
+    def setFreq(self, f):
+        self.freq = f
+        self.w = f*2*pi / 48000
+
+    def normalize(self):
+        l = (self.sin * self.sin + self.cos * self.cos) ** 0.5 
+        self.sin /= l
+        self.cos /= l
+        
+
 def gain(it, g):
     for v in it:
         yield g * next(it)
@@ -117,7 +127,7 @@ def main(argv):
     # Get a repl to facilitate live modifications
     d = globals()
     d.update(locals())
-    code.interact(banner=help_message, local=d, exitmsg='bye')
+    code.interact(banner=help_message, local=d)#, exitmsg='bye')
 
     # stop stream (6)
     stream.stop_stream()
