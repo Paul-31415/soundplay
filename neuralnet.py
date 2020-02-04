@@ -8,6 +8,12 @@ def sigmoid(x):
     else:
         return 0 + (x > 0)
 
+def inverseSigmoid(y):
+    if y == 0 or y == 1:
+        return 200 * (2*y-1)
+    else:
+        return - math.log(1/y - 1)
+
 def dsigmoid(x):
     return sigmoid(x) * (1 - sigmoid(x))
 
@@ -65,7 +71,14 @@ class NeuralNet:
             self.layers.insert(len(self.layers),l)
         self.layers.insert(len(self.layers),self.inputL)
         self.hiddenL = [v for v in reversed(self.hiddenL)]
-        
+        self.output = [0 for i in range(outputN)]
+
+    def computePropFrac(self,layer,mode=False):
+        if mode:
+            pass
+        else:
+            self.propFrac = (len(self.layers)-layer-2)/(len(self.layers)-layer-1)
+    
 
     def think(self,inputs):
         for i in range(len(inputs)):
@@ -75,12 +88,15 @@ class NeuralNet:
             for n in l:
                 n.fire()
         for n in self.outputL: # for making reset work right
-            n.fire() 
+            n.fire()
+        for i in range(len(self.outputL)):
+            self.output[i] = self.outputL[i].getValue() 
         out = [self.outputL[i].getValue() for i in range(len(self.outputL))]
         return out
     
-    def learn(self,expectedOutputs,layer = 0):
+    def learn(self,expectedOutputs,layer = 0,propMode=False):
         assert( len(self.layers[layer]) >= len(expectedOutputs))
+        self.computePropFrac(layer,propMode)
         Error = 0
         newExpected = [ i.getValue() for i in self.layers[layer+1]]
         for j in range(len(expectedOutputs)):
@@ -108,9 +124,9 @@ class NeuralNet:
         for i in range(n):
             for d in dataset:
                 self.think(d[0])
-                self.learn(d[1])
-            self.modifyRates()
+                err = self.learn(d[1])
+            self.modifyRates(err)
 
-    def modifyRates(self):
-        pass
+    def modifyRates(self,n):
+        self.learnR = n[1]
     
