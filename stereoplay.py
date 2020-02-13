@@ -97,7 +97,10 @@ class OA:
 
     def get_n(self, osc, n,f=1):
         # FIXME: np.int16
-        a = np.fromiter(yield_unpacked(yield_n_scaled(osc, n, self.sf*f)), np.int16, n*2)
+        try:
+            a = np.fromiter(yield_unpacked(yield_n_scaled(osc, n, self.sf*f)), np.int16, n*2)
+        except RuntimeError:
+            a = np.fromiter(yield_unpacked(yield_n_scaled(zeros(), n, self.sf*f)), np.int16, n*2)
         rv = a.tobytes()
         return rv
 
@@ -114,7 +117,7 @@ def main(argv):
     mix = Thing()
     mix.out = mute
     mix.scale = 1
-
+    mix.sampleRate = 48000
     adapter = OA(depth)
 
     # define callback (2)
@@ -128,10 +131,11 @@ def main(argv):
     # open stream using callback (3)
     stream = p.open(format=p.get_format_from_width(depth),
                     channels=2,
-                    rate=48000,
+                    rate=mix.sampleRate,
                     output=True,
                     stream_callback=callback)
 
+    
     # start the stream (4)
     stream.start_stream()
 
