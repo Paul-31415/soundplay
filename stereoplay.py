@@ -78,9 +78,16 @@ def zeros():
     while True:
         yield 0
 
-def yield_n_scaled(it, n, sf=1.0):
+def yield_n_scaled(it, n, mix):
     for i in range(n):
-        yield next(it) * sf
+        v = next(it) * mix.scale
+        if max(abs(v.real),abs(v.imag))>mix.hardMax:
+            oldS = mix.scale
+            mix.scale /= max(abs(v.real),abs(v.imag))/mix.hardMax
+            v /= oldS
+            v *= mix.scale
+        yield v
+
 
 class Thing:
     pass
@@ -95,12 +102,13 @@ class OA:
         self.bytes_per_sample = bytes_per_sample
         self.sf = (1<<(bytes_per_sample*8-1)) - 1
 
-    def get_n(self, osc, n,f=1):
-        # FIXME: np.int16
+    def get_n(self, osc, n,mix=None):
         try:
-            a = np.fromiter(yield_unpacked(yield_n_scaled(osc, n, self.sf*f)), np.int16, n*2)
-        except RuntimeError:
-            a = np.fromiter(yield_unpacked(yield_n_scaled(zeros(), n, self.sf*f)), np.int16, n*2)
+            a = np.fromiter(yield_unpacked(yield_n_scaled(osc, n, mix)), np.float32, n*2)
+        except RuntimeError as er:
+            #print(er)
+            mix.out = zeros()
+            a = np.fromiter(yield_unpacked(yield_n_scaled(zeros(), n, mix)), np.float32, n*2)
         rv = a.tobytes()
         return rv
 
@@ -117,25 +125,60 @@ def main(argv):
     mix = Thing()
     mix.out = mute
     mix.scale = 1
-    mix.sampleRate = 48000
+    #mix.compress = 1
+    mix.hardMax = 2
+    mix.rate = 48000
     adapter = OA(depth)
-
+    __oldSampleRate = mix.rate
     # define callback (2)
     def callback(in_data, frame_count, time_info, status):
         #data = wf.readframes(frame_count)
-        data = adapter.get_n(mix.out, frame_count,mix.scale)
-        #print(frame_count, time_info, status, end=': ')
-        #print(' '.join('%02x%02x' % (data[2*i], data[2*i+1]) for i in range(10)))
-        return (data, pyaudio.paContinue)
+        try:
+            try:
+                mix.out = iter(mix.out)
+            except TypeError:
+                data = adapter.get_n(mute, frame_count, mix)
+                return (data, pyaudio.paContinue)
+            data = adapter.get_n(mix.out, frame_count, mix)
+            #print(frame_count, time_info, status, end=': ')
+            #print(' '.join('%02x%02x' % (data[2*i], data[2*i+1]) for i in range(10)))
+            return (data, pyaudio.paContinue)
+        except Exception as e:
+            mix.error = e
+            mix.out = mute
+            data = adapter.get_n(mix.out, frame_count, mix)
+            return (data, pyaudio.paContinue)
 
     # open stream using callback (3)
-    stream = p.open(format=p.get_format_from_width(depth),
+    stream = p.open(format=pyaudio.paFloat32,
                     channels=2,
-                    rate=mix.sampleRate,
+                    rate=mix.rate,
                     output=True,
                     stream_callback=callback)
 
-    
+    def update():
+        global __oldSampleRate,stream,p
+        if __oldSampleRate != mix.rate:
+            __oldSampleRate = mix.rate
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
+            p = pyaudio.PyAudio()
+            stream = p.open(format=pyaudio.paFloat32,
+                            channels=2,
+                            rate=int(mix.rate),
+                            output=True,
+                            stream_callback=callback)
+            stream.start_stream()
+    def pause():
+        global stream
+        stream.stop_stream()
+        stream.close()
+    def rate(r=None):
+        if r != None:
+            mix.rate = r
+            update()
+        return mix.rate
     # start the stream (4)
     stream.start_stream()
 

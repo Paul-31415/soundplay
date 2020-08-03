@@ -35,3 +35,10 @@ def out(g,name="out.aiff",extent = -1,channels=2,rate=48000,gain = .5,prec=16,di
         f.close()
     return
 
+import wave
+def fout(d,name = "out.wav"):
+    with wave.open(name,"wb") as f:
+        f.setparams(2,4,48000,0)
+
+        for e in d:
+            f.writeframes((int(e.real*(1<<31))%(1<<32)).to_bytes(4,"little")+(int(e.imag*(1<<31))%(1<<32)).to_bytes(4,"little"))

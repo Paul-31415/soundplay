@@ -2,31 +2,10 @@ import wave
 import audioread
 
 
-class waveFile:
-    def __init__(self,path):
-        self.path = path
-
-    def __iter__(self):
-        with wave.open(open(self.path,"rb"),"rb") as wav:
-            n = wav.getnchannels()
-            w = wav.getsampwidth()
-            r = wav.readframes(1)
-            d = 1<<(8*w-1)
-            if n == 1:
-                while len(r):
-                    yield int.from_bytes(r,"little",signed=w>1)/d - (w==0)
-                    r = wav.readframes(1)
-            else:
-                while len(r):
-                    yield (int.from_bytes(r[0:w],"little",signed=w>1)/d - (w==0))\
-                        +1j*(int.from_bytes(r[w:w*2],"little",signed=w>1)/d - (w==0))
-                    r = wav.readframes(1)
                 
         
 
-formats = {#"wav":waveFile,
 
-}  
 
 
 class _audioFile:
@@ -37,6 +16,7 @@ class _audioFile:
             self.dat = [i for i in f]
             self.n = f.channels
             self.d = 1<<15
+            self.length = sum((len(i) for i in self.dat))//self.n//2
             self.rate = f.samplerate
             if self.n == 1:
                 self.conv = lambda x: int.from_bytes(x,"little",signed=True)/self.d
@@ -61,7 +41,61 @@ class _audioFile:
         mul = 2*self.n
         return self.conv(self.dat[i//div][(i*mul)%4096:(i*mul%4096)+mul])
         
+class _waveFile:
+    def __init__(self,path):
+        self.path = path
+        self.dat = None
+        self.rate = None
+        self.d = 1
+        self.w = 0
+        self.n = 0
+    def __iter__(self):
+        with wave.open(open(self.path,"rb"),"rb") as wav:
+            n = wav.getnchannels()
+            w = wav.getsampwidth()
+            r = wav.readframes(1)
+            d = 1<<(8*w-1)
+            if n == 1:
+                while len(r):
+                    yield int.from_bytes(r,"little",signed=w>1)/d - (w==0)
+                    r = wav.readframes(1)
+            elif n == 2:
+                while len(r):
+                    yield (int.from_bytes(r[0:w],"little",signed=w>1)/d - (w==0))\
+                        +1j*(int.from_bytes(r[w:w*2],"little",signed=w>1)/d - (w==0))
+                    r = wav.readframes(1)
+            else:
+                while len(r):
+                    yield [(int.from_bytes(r[w*i:w*(i+1)],"little",signed=w>1)/d - (w==0)) for i in range(n)]
+                    r = wav.readframes(1)
 
+    def load(self):
+        with wave.open(open(self.path,"rb"),"rb") as wav:
+            self.rate = wav.getframerate()
+            l = wav.getnframes()
+            n = wav.getnchannels()
+            w = wav.getsampwidth()
+            self.w = w
+            self.n = n
+            self.d = 1<<(8*w-1)
+            self.o = -(w==0)
+            self.dat = wav.readframes(l)
+    def __len__(self):
+        if self.dat == None:
+            self.load()
+        return len(self.dat)
+    def __getitem__(self,i):
+        if self.dat == None:
+            self.load()
+        do = i*self.w*self.n
+        if self.n == 1:
+            return int.from_bytes(self.dat[do:do+self.w],"little",signed=self.w>1)/self.d-(self.w==0)
+        elif self.n == 2:
+            return int.from_bytes(self.dat[do:do+self.w],"little",signed=self.w>1)/self.d-(self.w==0) \
+                +1j*(int.from_bytes(self.dat[do+self.w:do+self.w*2],"little",signed=self.w>1)/self.d-(self.w==0))
+        else:
+            return [int.from_bytes(self.dat[do+self.w*i:do+self.w*(i+1)],"little",signed=self.w>1)/self.d-(self.w==0) for i in range(self.n)]
+        
 def resamp(g,r,intrp=0):
     #    if intrp == 0:
     t = 0
@@ -82,20 +116,37 @@ def resamp(g,r,intrp=0):
             while t>0:
                 v = """
 
+formats = {"wav":_waveFile,
+
+}  
     
 class audioFile:
-    def __init__(self,path,zeroPad = True, loop=False):
+    def __init__(self,path,bpm=None,zeroPad = True, loop=False,tsr = None):
+        self.bpm = bpm
         self.path = path
         self.zeroPad = zeroPad
         self.loop = loop
         self.enc = path.split(".")[-1]
         self.interp = 0
+        self.rate = tsr
+        self.loaded = False
+    def load(self):
         try:
-            self.file = formats[self.enc](path)
+            self.file = formats[self.enc](self.path)
+            self.file.load()
         except:
-            self.file = _audioFile(path)
-        self.rate = 48000
+            self.file = _audioFile(self.path)
+        if self.rate == None:
+            self.rate = self.file.rate
+        self.loaded = True
+    def loadAsAF(self):
+        self.file = _audioFile(self.path)
+        if self.rate == None:
+            self.rate = self.file.rate
+        self.loaded = True
     def __iter__(self):
+        if not self.loaded:
+            self.load()
         def g(self,s):
             for i in s:
                 yield i
@@ -105,11 +156,15 @@ class audioFile:
             while self.loop:
                 for i in s:
                     yield i
+        if self.file.rate == self.rate:
+            return g(self,self.file)
         return resamp(g(self,self.file),self.file.rate/self.rate,self.interp)
 
     def __getitem__(self,i):
+        if not self.loaded:
+            self.load()
         i *= self.file.rate/self.rate
-        if self.zeroPad and (i < 0 or i >= len(self.file)):
+        if self.zeroPad and (int(i) < 0 or int(i) >= len(self.file)):
             return 0
         else:
             if self.loop:
@@ -119,5 +174,11 @@ class audioFile:
             else:
                 f = (i-int(i))
                 return self.file[int(i)]*(1-f)+self.file[int(i+1) % len(self.file)]*f
+    def __len__(self):
+        if not self.loaded:
+            self.load()
+        return (len(self.file)*self.file.rate)//self.rate
     def c(self,i):
         return self[i.real].real+self[i.imag].imag*1j
+    def spb(self):
+        return 60*self.rate/self.bpm

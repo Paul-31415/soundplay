@@ -243,3 +243,38 @@ polyphonicEx = avg(exfull,exampleSequenceB,drumTrack)
 def diphonic(f1,f2):
     f2,f1 = sorted([f1,f2])
     return op(lambda a,b : a^b,comparator(ramp((f1+f2)/2),0.5),comparator(ramp((f1-f2)/2),0.5))
+
+
+
+
+
+
+
+
+
+
+def lfsr(p,s=1):
+    while 1:
+        yield s&1
+        s = (p*(s&1))^(s>>1)
+
+def gg(r,g,w=.5):
+    t = 0
+    for yes in g:
+        while t < 1:
+            yield (t < w) * yes
+            t += r
+        t -= 1
+
+def gn(r,d,p=1):
+    t = 0
+    a = 0
+    while 1:
+        a += p
+        yes = a>=1
+        a %= 1
+        while t < 1:
+            yield (t>.5) and yes
+            t += r
+        t -= 1
+        p *= d
