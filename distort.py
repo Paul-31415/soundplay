@@ -1143,6 +1143,55 @@ def pllzclnw(f = lambda v,f:v,tc = .001,hc=3,hf=2,tn=0):
         return f(v,c[2])
     return do
 
+def pid(p=1,i=0,d=0):
+    def c(v,a=[0,0],t=[p,i,d]):
+        a[0] += v
+        d = v-a[1]
+        a[1] = v
+        return v*t[0]+a[0]*t[1]+d*t[2]
+    return c
+def zc(i=0):
+    def do(v,p=[i]):
+        r = (v<0)^(p[0]<0)
+        p[0] = v
+        return r
+    return do
+def fll_zc(ctl = pid(.1,.1,.1),fmax=1/3):
+    zcflt = zc()
+    zcvco = zc(-.5)
+    def do(v,a=[0,0],e=[0]):
+        cross = zcflt(v)
+        a[0] = (a[0]+a[1])%1
+        vcc = zcvco(a[0]-.5)
+        e[0] += cross-(vcc)*((a[1]>=0)*2-1)
+        a[1] += ctl(e[0])
+        if abs(a[1])>fmax:
+            a[1] *= fmax/abs(a[1])
+        return a
+    return do
+def pll_zc(ctl = pid(.1,0,0),fmax=1/3):
+    zcflt = zc()
+    zcvco = zc(-.5)
+    def do(v,a=[0,0]):
+        cross = zcflt(v)
+        a[0] = (a[0]+a[1])%1
+        vcc = zcvco(a[0]-.5)
+        a[1] += ctl(cross-(vcc)*((a[1]>=0)*2-1))
+        if abs(a[1])>fmax:
+            a[1] *= fmax/abs(a[1])
+        return a
+    return do
+
+
+def sin2π(x):
+    return math.sin(2*math.pi*x)
+
+def vco(mod=1,phase=0):
+    def do(v,p=[phase,mod]):
+        p[0] = (p[0] + v)%p[1]
+        return p[0]
+    return do
+
 def erodeml():
     def do(v,p=[100]):
         r = v if abs(v)<abs(p[0]) else p[0]
@@ -1194,6 +1243,103 @@ def tritapsl(tr=0,bs=4800):
         return b[int(c[1])]*(1-f)+b[int(c[1]+len(b)/2)]*f
     return do
 
+def tapsl(tr=0,n=2,bs=4800,kf = lambda f:1-abs(f)):
+    #tempo will always be 1:1
+    #can only change pitch
+    if n == 2 and 0:
+        def do(v,c=[0,0,tr],b=[0]*bs):
+            b[c[0]] = v
+            c[0] = (c[0]+1)%len(b)
+            #move taps
+            c[1] = (c[1]+c[2])%(len(b)/2)
+            # c[0] is newest, c[0]-1 is prev newest
+            
+            f = 2*abs((c[1]-c[0])%len(b)-(len(b)/2))/len(b)
+            return b[int(c[1])]*kf(f)+b[int(c[1]+len(b)/2)]*kf(f-1)
+    else:
+        def do(v,c=[0,0,tr],b=[0]*bs,n=n):
+            b[c[0]] = v
+            c[0] = (c[0]+1)%len(b)
+            #move taps
+            c[1] = (c[1]+c[2])%(len(b)/n)
+            # c[0] is newest, c[0]-1 is prev newest
+
+            i = c[0]+c[1]
+            f = 2*c[1]/len(b)-1
+            r = b[int(i)%len(b)]*kf(f)
+            for t in range(1,n):
+                i += len(b)/n
+                f += 2/n
+                r += b[int(i)%len(b)]*kf(f)
+            return r
+    return do
+def tapsdl(tr=0,n=2,bs=4800,kf = lambda v,f:v*(1-abs(f))):
+    #tempo will always be 1:1
+    #can only change pitch
+    if n == 2 and 0:
+        def do(v,c=[0,0,tr],b=[0]*bs):
+            b[c[0]] = v
+            c[0] = (c[0]+1)%len(b)
+            #move taps
+            c[1] = (c[1]+c[2])%(len(b)/2)
+            # c[0] is newest, c[0]-1 is prev newest
+            
+            f = 2*abs((c[1]-c[0])%len(b)-(len(b)/2))/len(b)
+            return kf(b[int(c[1])],f)+kf(b[int(c[1]+len(b)/2)],f-1)
+    else:
+        def do(v,c=[0,0,tr],b=[0]*bs,n=n):
+            b[c[0]] = v
+            c[0] = (c[0]+1)%len(b)
+            #move taps
+            c[1] = (c[1]+c[2])%(len(b)/n)
+            # c[0] is newest, c[0]-1 is prev newest
+
+            i = c[0]+c[1]
+            f = 2*c[1]/len(b)-1
+            r = kf(b[int(i)%len(b)],f)
+            for t in range(1,n):
+                i += len(b)/n
+                f += 2/n
+                r += kf(b[int(i)%len(b)],f)
+            return r
+    return do
+
+def tapsmpll(tr=0,n=2,bs=4800,kf = None):
+    if kf == None:
+        kf = lambda v,f:v*(1-abs(f)) #triangle
+        kf = lambda v,f,n=n: v if f == 0 else v*math.sin(math.pi*n/2*f)/(math.pi*n/2*f) #sinc
+    #tempo will always be 1:1
+    #can only change pitch
+    c = [0,0,tr]
+
+
+    import matplotlib.pyplot as plt
+    from matplotlib.widgets import Slider
+    plt.figure()
+    axm = plt.axes([0.1, 0.3, .8, .4])
+    sm = Slider(axm, 'pitch adjust', -5, 3, valinit=tr)
+    def update(val,d=c):
+        d[2] = sm.val
+    sm.on_changed(update)
+    plt.show(block=0)
+    def do(v,c=c,b=[0]*bs,n=n,s=update):
+        b[c[0]] = v
+        c[0] = (c[0]+1)%len(b)
+        #move taps
+        c[1] = (c[1]+c[2])%(len(b)/n)
+        # c[0] is newest, c[0]-1 is prev newest
+        
+        i = c[0]+c[1]
+        f = 2*c[1]/len(b)-1
+        r = kf(b[int(i)%len(b)],f)
+        for t in range(1,n):
+            i += len(b)/n
+            f += 2/n
+            r += kf(b[int(i)%len(b)],f)
+        return r    
+
+    return do
+
 def tritapsrcl(bs=4800):
     #tempo will always be 1:1
     #can only change pitch
@@ -1211,3 +1357,39 @@ def tritapsrcl(bs=4800):
         return b[int(c[1])]*(1-f)+b[int(c[1]+len(b)/2)]*f
     return do
                     
+
+
+def followl(vf=lambda o,d: o*.995+d*(abs(d)-.1)*.01):
+    def do(v,p=[0,0],vf=vf):
+        p[1] = vf(p[1],v-p[0])
+        p[0] += p[1]
+        return p[0]
+    return do
+
+lerp = lambda a,b,x: a*(1-x)+b*x
+
+sc = followl(lambda o,d: lerp(o,d,max(0.01,1.0-abs(d)*6.0)))
+sc2 = followl(lambda o,d: lerp(o,d/(abs(d)+.1),max(0.05,1.0-abs(d))))
+ah = followl(lambda o,d: o*.999+d*.01/(abs(d)+1e-10))
+
+
+
+
+def swapperl(sg=[12000],i0=0):
+    def do(a,b,i=[0,i0],sg=sg,w=[0]):
+        i[1] += 1
+        if i[1] > sg[i[0]]:
+            i[1] = 0
+            i[0] = (i[0]+1)%len(sg)
+            w[0] = not w[0]
+        if w[0]:
+            return b
+        return a
+    return do
+        
+
+
+from random import random
+def embiggen(a,l,n=10,fd = lambda i: .995+random()/100,md = lambda i: (random()*2+random*2j)-(1+1j)):
+    r = a*l
+    

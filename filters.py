@@ -88,7 +88,9 @@ class Polynomial:
     def __len__(self):
         return len(self.constants)
     def __getitem__(self,i):
-        return self.constants.__getitem__(i)
+        if i < self.constants.__len__():
+            return self.constants.__getitem__(i)
+        return 0
     def __setitem__(self,i,v):
         self.constants.__setitem__(i,v)
     def __iter__(self):
@@ -422,9 +424,75 @@ def iir2l(a1=0,a2=0,b0=1,b1=0,b2=0,s1=0,s2=0):
         return b[0]*s[0]+b[1]*s[1]+b[2]*p
     return do
 
+#complex transform capable of matrix:
+# a*x+b*x.conj
+# = (ar+br)*xr+(bi-ai)*xi+ i*((ai+bi)*xr+(ar-br)*xi)
+# = [ar+br bi-ai] [xr]
+#   [ai+bi ar-br] [xi]
+def mtrxToCT(m=[[1,0],[0,1]]):
+    ar = (m[0][0]+m[1][1])/2
+    br = (m[0][0]-m[1][1])/2
+    ai = (m[1][0]-m[0][1])/2
+    bi = (m[1][0]+m[0][1])/2
+    return [ar+ai*1j,br+bi*1j]
+def CTdet(*c):
+    if len(c) == 1:
+        a,b = c[0]
+    else:
+        a,b = c
+    return (a.real+b.real)*(a.real-b.real)-(a.imag+b.imag)*(b.imag-a.imag)
+def CTmax(*c):
+    if len(c) == 1:
+        a,b = c[0]
+    else:
+        a,b = c
+    #returns max magnitude increase factor and phase
+    # max_t(|a*e^(i*t)+b*e^(-i*t)|)
+    # = max_t( (a*e^(i*t)+b*e^(-i*t)) * (a.c*e^(-i*t)+b.c*e^(i*t)) )
+    #  max_t(a*a.c+(a*b.c*e^(2i*t)+b*a.c*e^(-2i*t))+b*b.c)
+    r = a*a.conjugate()+b*b.conjugate()
+    p = a*b.conjugate()# (a+ib)(c-id) =? (a-ib)(c+id)
+    #q = p.conjugate() #ac+i(bc-ad)+bd  ac+i(ad-bc)+bd
+    #r+p*n+(p*n).c
+    #max v = r+abs(p)^2
+    return abs(r)+abs(p)**2
+
+def iirm0al(b=[1,0]):
+    def do(v,b=b):
+        return v*b[0]+v.conjugate()*b[1]
+    return do
+def iirm1al(a=[[0,0]],b=[[1,0],[0,0]],s=None):
+    if s == None:
+        s = [0]
+    def do(v,a=a,b=b,s=s):
+        v,s[0] = s[0],v-a[0][0]*s[0]-a[0][1]*s[0].conjugate()
+        return b[0][0]*s[0]+b[0][1]*s[0].conjugate()+b[1][0]*v+b[1][1]*v.conjugate()
+    return do
+def iirm2al(a=[[0,0],[0,0]],b=[[1,0],[0,0],[0,0]],s=None):
+    if s == None:
+        s = [0,0]
+    def do(v,a=a,b=b,s=s):
+        v,s[1],s[0] = s[1],s[0],v-a[0][0]*s[0]-a[0][1]*s[0].conjugate()-a[1][0]*s[1]-a[1][1]*s[1].conjugate()
+        return b[0][0]*s[0]+b[0][1]*s[0].conjugate()+b[1][0]*s[1]+b[1][1]*s[1].conjugate()+b[2][0]*v+b[2][1]*v.conjugate()
+    return do
+
+
+
+def biquadPeak(f,w,g):
+    #freq, width, gain
+    #width is the distance of the pole to 1
+    #g = (1-abs(z))/(1-abs(p))
+    z = (1-w*g)
+    p = (1+w)
+    #(z*e^(f2πj)-1x) has zero at z
+    #z^2, -2zcos, 1
+    t = -2*math.cos(f*2*math.pi)
+    b = [z*z,z*t,1]
+    a = [t/p,1/p/p]#
+    return iir2l(*a,*b)
 def iir2a(g,a=[1,0,0],b=[1,0,0],s1=0,s2=0):    
     for v in g:
-        r = v*a[0]-s1*a[1]-s2*a[2]
+        r = v/a[0]-s1*a[1]-s2*a[2]
         yield b[0]*r+b[1]*s1+b[2]*s2
         s2,s1 = s1,r
 def iir2al(ap=[0,0],bp=[1,0,0],st=None):
@@ -450,6 +518,11 @@ def iir2zpl(zero=[math.inf,math.inf],pole=[math.inf,math.inf],gain=[1],state=[0,
         c = z[0]*z[1]
         return g[0]*(s[0]-s[1]*(z[0]+z[1])/c+r/c)
     return do
+
+def polar(mag,freq,sr=48000):
+    theta = freq/sr
+    return mag*eone**(1j*theta)
+
 def iir2zprl(zero_recip=[0,0],pole_recip=[0,0],gain=[1],state=[0,0]):
     def do(v,z=zero_recip,p=pole_recip,g=gain,s=state):
         r,s[1],s[0] = s[1],s[0],v+s[0]*(p[0]+p[1])-s[1]*p[0]*p[1] #(1-xp1)(1-xp2) = 1-x(p1+p2)+x^2(p1p2)
@@ -463,6 +536,229 @@ def iir3(g,a1=0,a2=0,a3=0,b0=1,b1=0,b2=0,b3=0,s1=0,s2=0,s3=0):
         r = v-s1*a1-s2*a2-s3*a3
         yield b0*r+b1*s1+b2*s2+b3*s3
         s3,s2,s1 = s1,s2,r
+
+
+def iiral(a=[1],b=[1],s=None):
+    if s == None:
+        s = [0]*max(len(a),len(b))
+    def do(v,i=[0],a=a,b=b,s=s):
+        #input
+        r = v*a[0]
+        for o in range(1,len(a)):
+            r -= a[o]*s[i[0]-o]
+        r /= a[0]
+        s[i[0]] = r
+        r *= b[0]
+        for o in range(1,len(b)):
+            r += b[o]*s[i[0]-o]
+        i[0] = (i[0]+1)%len(s)
+        return r
+    return do
+        
+        
+#use show(block=False)
+def iirIA(l=3,plotN = 1<<8,ms=.5):#interactive iir filter arrays
+    A = [1]+[0]*(l-1)
+    B = [1]+[0]*(l-1)
+    
+    
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    from matplotThings import DraggablePoint
+    from matplotlib.widgets import CheckButtons
+    
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.set(xlim=(0,5),ylim=(-2.5,2.5))
+    plt.subplots_adjust(left=0.2)
+    drs = []
+    circles = [patches.Circle((5, -1), 0.08, fc='xkcd:blue', alpha=0.75),
+               patches.Circle((0, 1), 0.08, fc='xkcd:red', alpha=0.75)]+\
+               [i for j in range(l-1) for i in (
+                   patches.Circle((10*((j+2)>>1)/l, 2.375*((j&1)*2-1)), 0.05, fc='xkcd:sky blue', alpha=0.75),
+                   patches.Circle((10*((j+2)>>1)/l, 0), 0.05, fc='xkcd:light red', alpha=0.75))]
+                                                
+    for circ in circles:
+        ax.add_patch(circ)
+        dr = DraggablePoint(circ)
+        dr.dat = len(drs)
+        drs.append(dr)
+        dr.connect()
+    refs = [drs]
+
+    cbs = None
+    
+    s = .5/plotN
+    x = [i*s for i in range(1,plotN)]
+    def phs(r,xes):
+        xes = iter(xes)
+        c = 0
+        ph = (arg(r(next(xes)))/math.pi)
+        yield ph
+        for i in xes:
+            phn = (arg(r(i))/math.pi)+c
+            while abs(ph-phn)>.5:
+                a = 1-2*(phn > ph)
+                c += a
+                phn += a
+            yield phn
+            ph = phn
+
+    x = [.5*i/plotN for i in range(-plotN,plotN)]
+    mdat, = plt.plot([abs(10*i) for i in x], [-1]*plotN+[1]*plotN,"o", ms=ms)
+    ppdat, = plt.plot([abs(10*i) for i in x[plotN:]], [0]*plotN,"o", ms=ms)
+    pndat, = plt.plot([abs(10*i) for i in x[:plotN]], [0]*plotN,"o", ms=ms)
+    r = response(B,A)
+    def fmap(x):
+        if x<0:
+            return -fmap(-x)
+        return (x/10)*math.exp(7*(x-5)/5) if cbs.get_status()[1] else x/10
+    def drawR():
+        mdat.set_ydata([abs(r(fmap(c*10)))*(2*(c>=0)-1) for c in x])
+        ppdat.set_ydata([i/2 for i in phs(lambda f:r(fmap(f*10)),x[plotN:])])
+        pndat.set_ydata([i/2 for i in phs(lambda f:r(fmap(f*10)),x[plotN-1::-1])][::-1])
+        fig.canvas.draw_idle()
+    def cmap(x,y):
+        return abs(y)*eone**(fmap(x)*1j*(2*(y>0)-1))
+    def nrm(a):
+        f = math.sqrt(abs(a[0])**2+abs(a[1])**2)
+        return [a[0]/f,a[1]/f]
+    def amap(x,y):
+        g = lambda x: 3*(x+x**11)
+        return nrm([1,-cmap(x,(2*(y<0)-1)*math.tanh(g(max(abs(y*2)-.125,0)/(2.5-.25))))])
+    def bmap(x,y):
+        return nrm([1,-cmap(x,max(0,math.tanh(min(4,4*(1.125-abs(y/2))))/math.tanh(4))*(2*(y<0)-1))])
+    def calcTerms():
+        a = Polynomial([cmap(*drs[1].point.center)])
+        b = Polynomial([cmap(*drs[0].point.center)])
+        for i in range(1,l):
+            b *= Polynomial(bmap(*drs[i*2].point.center))
+            a *= Polynomial(amap(*drs[i*2+1].point.center))
+        for i in range(l):
+            A[i] = a[i]
+            B[i] = b[i]
+
+    rax = plt.axes([0.05, 0.4, 0.1, 0.15])
+    cbs = CheckButtons(rax, ["pair","logf","quad"], [True,False,False])
+    
+    def move(dr):
+        if dr.dat > 1:
+            if cbs.get_status()[0]:
+                oi = ((dr.dat-2) ^ 2)+2
+                if oi < len(drs):
+                    drs[oi].move(dr.pos()[0],-dr.pos()[1])
+                    if cbs.get_status()[2]:
+                        ooi = ((oi-2) ^ 1)+2
+                        if ooi < len(drs):
+                            drs[ooi].move(drs[oi].pos()[0],drs[ooi].pos()[1])
+            if cbs.get_status()[2]:
+                oi = ((dr.dat-2) ^ 1)+2
+                if oi < len(drs):
+                    drs[oi].move(dr.pos()[0],drs[oi].pos()[1])
+        calcTerms()
+        drawR()
+    for dr in drs:
+        dr.hooks[1]=move
+    """dat, = plt.plot(x, [1]*len(x), lw=ms)
+    l, = plt.plot([0,.5], [1,1],"k--", lw=ms)
+
+    one, = plt.plot([0,.5], [(L+1)/2]*2,"k-", lw=ms)
+    plt.grid(color='xkcd:grey',linestyle='-')
+    plt.axis([0,.5,0,L+1])
+    plt.subplots_adjust(left=0.25, bottom=0.25)
+    
+    axdly = plt.axes([0.25, 0.1, 0.65, 0.03])
+    axA = plt.axes([0.25, 0.15, 0.65, 0.03])
+    dly = Slider(axdly, 'Delay', 0, 1, valinit=1/(L+1))
+    alph = Slider(axA, 'Alpha', 0, 1, valinit=a)
+    def upd(val):
+        a = alph.val
+        d = (dly.val*(La[0]+1))
+        l.set_ydata([d,d])
+        r = response(delayFIRterms(d,La[0],a))
+        p = [p for p in phs(r,x)]
+        dat.set_ydata([1+p[i]/x[i] for i in range(len(x))])
+
+        one.set_ydata([(La[0]+1)/2]*2)
+        mdat.set_ydata([abs(r(i))*(La[0]+1)/2 for i in x])
+        
+        fig.canvas.draw_idle()
+    dly.on_changed(upd)
+    alph.on_changed(upd)
+
+    p_ax = plt.axes([0.8, 0.025, 0.1, 0.04])
+    m_ax = plt.axes([0.25, 0.025, 0.1, 0.04])
+    incL = Button(p_ax, '+')
+    decL = Button(m_ax, '-')
+    def ul(La=La):
+        ax.axis([0,.5,0,La[0]+1])
+    def il(ev,La=La):
+        La[0] += 1
+        ul()
+        upd(0)
+    incL.on_clicked(il)
+    def dl(ev,La=La):
+        La[0] = max(La[0]-1,1)
+        ul()
+        upd(0)
+    decL.on_clicked(dl)
+    """
+    return plt,A,B,refs
+
+
+def firl(k=[1]):
+    def f(v,i=[0],k=k,s=[0]*(len(k)-1)):
+        r = v*k[0]
+        for o in range(1,len(k)):
+            r += s[(i[0]-o)%len(s)]*k[o]
+        s[i[0]] = v
+        i[0] = (i[0] + 1)%len(s)
+        return r
+    return f
+def lpptl(g=1,n=2):
+    if n == 1:
+        def lp(v):
+            return v*g
+    elif n == 2:
+        def lp(v,p=[0,g/2]):
+            v,p[0] = (v+p[0])*p[1],v
+            return v
+    elif n == 3:
+        def lp(v,p=[0,0,g/4]):
+            v,p[0],p[1] = (v+2*p[0]+p[1])*p[2],v,p[0]
+            return v
+    else:
+        k = Polynomial([.5,.5])
+        t = Polynomial([1])
+        b = n.bit_length()
+        for i in range(b-1,0-1,-1):
+            t = t*t
+            if (1<<i)&n:
+                t = t*k
+        return firl(t*Polynomial([g]))
+    return lp
+def hpptl(g=1,n=2):
+    if n == 1:
+        def hp(v):
+            return v*g
+    elif n == 2:
+        def hp(v,p=[0,g/2]):
+            v,p[0] = (v-p[0])*p[1],v
+            return v
+    elif n == 3:
+        def hp(v,p=[0,0,g/4]):
+            v,p[0],p[1] = (v-2*p[0]+p[1])*p[2],v,p[0]
+            return v
+    else:
+        k = Polynomial([.5,-.5])
+        t = Polynomial([1])
+        b = n.bit_length()
+        for i in range(b-1,0-1,-1):
+            t = t*t
+            if (1<<i)&n:
+                t = t*k
+        return firl(t*Polynomial([g]))
+    return hp
 
 
 class IIR2:
@@ -481,12 +777,219 @@ class IIR2:
         #[-z^2,zx-zx,+x^2]
 
 
-def delayl(n=0,start=[]):
-    def do(v,i=[n],d=(start+[0]*(n+1))[:n+1]):
-        d[i[0]] = v
-        i[0] = (i[0]+1)%len(d)
-        return d[i[0]]
-    return do
+#todo: Lagrange interpolation delay
+# why: it has ≤ 1 gain at all frequencies
+#       so it's safe for feedback
+#todo: windowed sinc fractional delay
+# why: easy? good? idk.
+delayl_P_inverses = dict()
+def delayl(n=0,prec=3,band=.5,start=[]):
+    assert n >= 0
+    if n%1 == 0 or prec == 0:
+        n = int(round(n))
+        def do(v,i=[n],d=(start+[0]*(n+1))[:n+1]):
+            d[i[0]] = v
+            i[0] = (i[0]+1)%len(d)
+            return d[i[0]]
+        return do
+    elif prec == 1 and 0:
+        #linear interp
+        r = n%1
+        n = int(n)+1
+        def do(v,i=[n,r],d=(start+[0]*(n+1))[:n+1]):
+            d[i[0]] = v
+            i[0] = (i[0]+1)%len(d)
+            return d[i[0]]*i[1]+d[(i[0]+1)%len(d)]*(1-i[1])
+        return do
+    else:
+        #predelay with digital delay line
+        #want to make d be from floor(L/2+.5) to ceil(L/2 + .5)
+        L = prec+1
+        d = min(int(L/2+.5)+(n%1),n+1)
+        #print(d)
+        kern = delayFIRterms(d,L,band) #prec+1 to make it linear
+        #print(kern)
+        pad = max(0,1+int(n)-int(L/2+.5))
+        #print(pad)
+        line = (start + [0]*(int(n)+1+len(kern)))[:pad+len(kern)]
+        #print(line)
+        def do(v,i = [len(line)-1],d = line,k = kern[::-1]):
+            d[i[0]] = v
+            i[0] = (i[0]+1)%len(d)
+            r = 0
+            for o in range(len(k)):
+                r += d[(i[0]+o)%len(d)]*k[o]
+            return r
+        return do
+        
+
+
+def delayFIRterms(D,L=3,alpha=.5):
+    from signals import sinc
+    #http://users.spa.aalto.fi/vpv/publications/vesan_vaitos/ch3_pt1_fir.pdf
+    #h = (P^-1 p)
+    #note that if n > prec, we must pad out with an integer delay
+    #alpha = band
+    #D = n adjusted for padding
+    #L = prec
+    # P_k,l = alpha*sinc(alpha*(k-l))  k,l = 1,2,...,L
+    # p_l,k = alpha*sinc(alpha*(k-D))    k = 1,2,...,L
+    #
+    #P depends only on a and L, so we'll lazy eval and store the inverses
+    #so each P^-1 Matrix needs to be made once
+    key = (alpha,L)
+    if key in delayl_P_inverses:
+        P_inv = delayl_P_inverses[key]
+    else:
+        #matrix is m_row,col
+        import scipy.linalg
+        P = [[0]*L for i in range(L)]
+        for k_l in range(1-L,L):
+            r = alpha*sinc(alpha*(k_l))
+            for k in range(max(0,k_l),min(1+k_l-(1-L),L)):
+                l = k-k_l
+                P[k][l] = r
+        P_inv = scipy.linalg.inv(P)
+        delayl_P_inverses[key] = P_inv
+    # p_l,k = alpha*sinc(alpha*(k-D))    k = 1,2,...,L        
+    p = [alpha*sinc(alpha*(k-D)) for k in range(1,L+1)]
+    from numpy import matmul
+    return matmul(P_inv,p)
+def plotdelaysSlider(L=3,a=.5,plotN = 1<<8,ms=1):
+    d = 1
+    import matplotlib.pyplot as plt
+    from matplotlib.widgets import Slider,Button
+    fig, ax = plt.subplots()
+    La = [L]
+    s = .5/plotN
+    x = [i*s for i in range(1,plotN)]
+    def phs(r,xes):
+        xes = iter(xes)
+        c = 0
+        ph = (arg(r(next(xes)))/2/math.pi)
+        yield ph
+        for i in xes:
+            phn = (arg(r(i))/2/math.pi)+c
+            if abs(ph-phn)>.5:
+                a = 1-2*(phn > ph)
+                c += a
+                phn += a
+            yield phn
+            ph = phn
+    dat, = plt.plot(x, [1]*len(x), lw=ms)
+    l, = plt.plot([0,.5], [1,1],"k--", lw=ms)
+    mdat, = plt.plot(x, [(L+1)/2]*len(x), lw=ms)
+    one, = plt.plot([0,.5], [(L+1)/2]*2,"k-", lw=ms)
+    plt.grid(color='xkcd:grey',linestyle='-')
+    plt.axis([0,.5,0,L+1])
+    plt.subplots_adjust(left=0.25, bottom=0.25)
+    
+    axdly = plt.axes([0.25, 0.1, 0.65, 0.03])
+    axA = plt.axes([0.25, 0.15, 0.65, 0.03])
+    dly = Slider(axdly, 'Delay', 0, 1, valinit=1/(L+1))
+    alph = Slider(axA, 'Alpha', 0, 1, valinit=a)
+    def upd(val):
+        a = alph.val
+        d = (dly.val*(La[0]+1))
+        l.set_ydata([d,d])
+        r = response(delayFIRterms(d,La[0],a))
+        p = [p for p in phs(r,x)]
+        dat.set_ydata([1+p[i]/x[i] for i in range(len(x))])
+
+        one.set_ydata([(La[0]+1)/2]*2)
+        mdat.set_ydata([abs(r(i))*(La[0]+1)/2 for i in x])
+        
+        fig.canvas.draw_idle()
+    dly.on_changed(upd)
+    alph.on_changed(upd)
+
+    p_ax = plt.axes([0.8, 0.025, 0.1, 0.04])
+    m_ax = plt.axes([0.25, 0.025, 0.1, 0.04])
+    incL = Button(p_ax, '+')
+    decL = Button(m_ax, '-')
+    def ul(La=La):
+        ax.axis([0,.5,0,La[0]+1])
+    def il(ev,La=La):
+        La[0] += 1
+        ul()
+        upd(0)
+    incL.on_clicked(il)
+    def dl(ev,La=La):
+        La[0] = max(La[0]-1,1)
+        ul()
+        upd(0)
+    decL.on_clicked(dl)
+    return plt
+    
+def plotdelays(L=3,a=.5,dstep=.25,drange=None,plotN=1<<8,ms=.5):
+    import matplotlib.pyplot as plt
+    if drange == None:
+        drange = [1,L]
+
+    d = drange[0]
+    while d < drange[1]+dstep:
+        s = .5/(plotN)
+        x = [i*s for i in range(1,plotN)]
+        r = response(delayFIRterms(d,L,a))
+        ph = [(arg(r(i))/2/math.pi)%1 for i in x]
+        c = 0
+        for i in range(len(ph)-1):
+            ph[i+1] += c
+            if abs(ph[i]-ph[i+1])>.5:
+                a = 1-2*(ph[i+1] > ph[i])
+                c += a
+                ph[i+1] += a
+        
+        plt.plot([0,1],[d,d],"k--")
+        plt.plot(x,[1+ph[i]/x[i] for i in range(len(x))],'o',ms=ms)
+        d += dstep
+    plt.axis([0,.5]+[drange[0]-dstep,drange[1]+dstep])
+    plt.show()
+
+
+def response(polyb=[1],polya=[1]):
+    def resp(f,r=False,pb = polyb,pa = polya):
+        #f in nyquist units
+        denom = 0
+        num = 0
+        x = 1
+        factor = eone**(1j*f)
+        for i in range(min(len(pb),len(pa))):
+            denom += x*pa[i]
+            num += x*pb[i]
+            x *= factor
+        for i in range(len(pb),len(pa)):
+            denom += x*pa[i]
+            x *= factor
+        for i in range(len(pa),len(pb)): #only one of these loops will run
+            num += x*pb[i]
+            x *= factor
+        if r:
+            return num,denom
+        return num/denom
+    return resp
+
+def arg(x):
+    return math.atan2(x.imag,x.real)
+
+def safe0Log(x):
+    if x <= 0:
+        return -1e400
+    return math.log(x)
+
+def plotFilt(b=[1],a=[1],frange=[-1,1],res = 1<<12,mrange=[-4,4],ms=.5):
+    import matplotlib.pyplot as plt
+    r = response(b,a)
+    def ran(l,h,s):
+        while l < h:
+            yield l
+            l += s
+    funcm = lambda n,d: safe0Log(abs(n))-safe0Log(abs(d))
+    funcp = lambda n,d: ((arg(n)-arg(d))/(2*math.pi))
+    plt.plot([f for f in ran(frange[0],frange[1],1/res)],[funcm(*r(f,1)) for f in ran(frange[0],frange[1],1/res)],'o',[f for f in ran(frange[0],frange[1],1/res)],[funcp(*r(f,1)) for f in ran(frange[0],frange[1],1/res)],'o',ms=ms)
+    plt.axis(frange+mrange)
+    plt.show()
+
 
 def feedbackl(d=lambda x:0,b=lambda x:0,p = lambda x:x,s=0):
     #     .__b________.
@@ -515,6 +1018,292 @@ def parrl(a,b,m=.5):
     def do(v):
         return m*a(v)+(1-m)*b(v)
     return do
+
+
+def ffloor(f):
+    if type(f) == float and abs(f) == 1e400:
+        return f
+    return f-(f%1)
+
+class L_gain:
+    def __init__(self,gain=1):
+        self.gain = [gain]
+        self._keepmeinscope = None
+    def plot(self,gm=0,gM=2,gd=1,gf = lambda x:x, glf = lambda x,ox: "Gain:"+\
+             str(ffloor(safe0Log(x)*10*100)/100)+" dB"):
+        import matplotlib.pyplot as plt
+        from matplotlib.widgets import Slider
+        plt.figure()
+        axm = plt.axes([0.15, 0.2, .2, .7])
+        axp = plt.axes([0.65, 0.2, .2, .7])
+        sm = Slider(axm, 'Gain', gm, gM, valinit=gd,orientation = 'vertical')
+        sp = Slider(axp, 'Phase', -math.pi, math.pi, valinit=0,orientation = 'vertical')
+        def update(val,g=self.gain):
+            m = gf(sm.val)
+            sm.label.set_text(glf(m,sm.val))
+            g[0] = (math.e**(1j*sp.val))*m
+        sm.on_changed(update)
+        sp.on_changed(update)
+        self._keepmeinscope = update
+        return plt
+    def __call__(self):
+        def do(v,g=self.gain,keepmeinscope=self):
+            return v*g[0]
+        return do
+        
+class L_idelay:
+    def __init__(self,delay=0,maxD=4800):
+        self.delay = [delay]
+        self.maxD = maxD
+        self._keepmeinscope = None
+    def plot(self,df=None):
+        if df == None:
+            df = 10
+        if type(df) in [float,int]:
+            b = df
+            df = lambda x: self.maxD*(x*b**(x-1))
+        import matplotlib.pyplot as plt
+        from matplotlib.widgets import Slider
+        plt.figure()
+        axm = plt.axes([0.1, 0.3, .8, .4])
+        sm = Slider(axm, 'delay', 0, 1, valinit=0)
+        def update(val,d=self.delay):
+            v = df(sm.val)
+            d[0] = int(v)
+            sm.label.set_text("delay:"+str(d[0]))
+        sm.on_changed(update)
+        self._keepmeinscope = update
+        return plt
+    def __call__(self,start=[]):
+        def do(v,i=[self.delay[0]],d=self.delay,b=(start+[0]*(self.maxD+1))[:self.maxD+1],keepmeinscope=self):
+            b[i[0]] = v
+            i[0] = (i[0]+1)%len(b)
+            return b[(i[0]-d[0]-1)%len(b)]
+        return do
+
+class L_delay:
+    def __init__(self,delay=0,maxD=480,prec=3,band=.5):
+        self.delay = [delay]
+        self.pad = [0]
+        self.maxD = maxD+prec+1
+        self.band = band
+        self.prec = prec
+        self.kern = [None]
+        self._keepmeinscope = None
+        self.update()
+    def update(self):
+        n = self.delay[0]
+        L = self.prec+1
+        pad = min(max(0,int(n-L/2+1)),self.maxD-L)
+        d = 1 + n-pad
+        self.kern[0] = delayFIRterms(d,L,self.band) 
+        self.pad[0] = pad
+    def __call__(self,start=[]):
+        line = (start + [0]*self.maxD)[:self.maxD]
+        def do(v,i = [self.pad[0]],p=self.pad,d = line,k = self.kern):
+            d[i[0]] = v
+            r = 0
+            for o in range(len(k[0])):
+                r += d[(i[0]-p[0]-o)%len(d)]*k[0][o]
+            i[0] = (i[0]+1)%len(d)
+            return r
+        return do
+    def plot(self,df=None):
+        if df == None:
+            df = 10
+        if type(df) in [float,int]:
+            b = df
+            df = lambda x: self.maxD*(x*b**(x-1))
+        import matplotlib.pyplot as plt
+        from matplotlib.widgets import Slider
+        #plt.figure()
+        fig, ax = plt.subplots()
+        ax.set_ylim((min(self.kern[0]+[-1]),max(self.kern[0]+[1])))
+        l, = ax.plot([i for i in range(self.prec+1)], self.kern[0],"o", ms=2)
+        plt.subplots_adjust(left=.80,right=.95)
+        
+        axm = plt.axes([0.15, 0.5, .6, .4])
+        sm = Slider(axm, 'delay', 0, 1, valinit=0)
+        axb = plt.axes([0.15, 0.1, .6, .2])
+        sb = Slider(axb, 'band', 0, 1, valinit=self.band)
+        
+        def update(val,d=self.delay):
+            v = df(sm.val)
+            d[0] = v
+            self.band = sb.val
+            self.update()
+            l.set_ydata(self.kern[0])
+            ax.set_ylim((min(self.kern[0]+[-1]),max(self.kern[0]+[1])))
+            sm.label.set_text("delay:"+str(math.floor(d[0]*100)/100))
+            fig.canvas.draw_idle()
+            
+        sm.on_changed(update)
+        sb.on_changed(update)
+        
+        self._keepmeinscope = update
+        return plt
+
+def allpassl(r,f):
+    c = -2*r*math.cos(2*math.pi*f)
+    return iir2l(c,r*r,r*r,c,1)
+
+import numpy as np
+def fi(n):
+    for i in range(n//2):
+        yield i/n
+    for i in range(n//2-n,0):
+        yield i/n
+        
+def fourierFilter(kern = np.array([1.]),window = None):
+    if window == None:
+        window = np.array([.5*(1-math.cos(2*math.pi*i/len(kern))) for i in range(len(kern))])
+    def do(v,i = [0,len(kern)//2],outb = [np.array([0.j]*len(kern)),np.array([0.j]*len(kern))],k=kern,w=window):
+        v,outb[0][i[0]],outb[1][i[1]] = outb[0][i[0]]+outb[1][i[1]],v,v
+        i[0] = (i[0]+1)%len(k)
+        if i[0] == 0:
+            outb[0] = np.fft.ifft(np.fft.fft(outb[0]*w)*k)
+        i[1] = (i[1]+1)%len(k)
+        if i[1] == 0:
+            outb[1] = np.fft.ifft(np.fft.fft(outb[1]*w)*k)
+        return v
+    return do
+    
+
+def fourierStereoify(ramt=.6,amt=.3,fade=.9,l=1<<14):
+    if type(l) == int:
+        baseKern = np.array([1+0j]*l)
+    else:
+        baseKern = l
+        l = len(l)
+    window = np.array([.5*(1-math.cos(2*math.pi*i/l)) for i in range(l)])
+    kernf = lambda : (np.random.random(l)-.5)*ramt+(np.random.random(l)-.5)*amt*1j
+    def do(v,i = [0,l//2],outb = [np.array([0.j]*l),np.array([0.j]*l)],k=[baseKern,kernf()],w=window,l=l):
+        v,outb[0][i[0]],outb[1][i[1]] = outb[0][i[0]]+outb[1][i[1]],v,v
+        i[0] = (i[0]+1)%l
+        if i[0] == 0:
+            outb[0] = np.fft.ifft(np.fft.fft(outb[0]*w)*(k[0]+k[1]))
+            k[1] *= fade
+            k[1] += kernf()
+        i[1] = (i[1]+1)%l
+        if i[1] == 0:
+            outb[1] = np.fft.ifft(np.fft.fft(outb[1]*w)*(k[0]+k[1]))
+            k[1] *= fade
+            k[1] += kernf()
+        return v
+    return do
+    
+
+
+def fourierFuncFilter(filt = lambda a:a,kerl=256,window = None):
+    if window == None:
+        window = np.array([.5*(1-math.cos(2*math.pi*i/kerl)) for i in range(kerl)])
+    def do(v,i = [0,kerl//2],outb = [np.array([0.j]*kerl),np.array([0.j]*kerl)],w=window):
+        v,outb[0][i[0]],outb[1][i[1]] = outb[0][i[0]]+outb[1][i[1]],v,v
+        i[0] = (i[0]+1)%len(outb[0])
+        if i[0] == 0:
+            outb[0] = np.fft.ifft(filt(np.fft.fft(outb[0]*w)))
+        i[1] = (i[1]+1)%len(outb[1])
+        if i[1] == 0:
+            outb[1] = np.fft.ifft(filt(np.fft.fft(outb[1]*w)))
+        return v
+    return do
+
+def npFIR(b=np.array([1.+0j])):
+    def do(v,i=[0],s=np.array([0.j]*len(b)),k=b):
+        s[i[0]] = v
+        r = np.dot(np.concatenate((s[i[0]:],s[:i[0]])),k)
+        i[0] = (i[0]-1)%len(s)
+        return r
+    return do
+
+"""def sincOctaveStack(octaves=10,kernLen=6,window = lambda x: math.pow(-(x*x)*16)):
+    kern = np.array([math.sin(math.pi*(i+.5))/(math.pi*(i+.5)) * window((i+.5)/(kernLen+1)) for i in range(kernLen)])
+    def do(v,i=[0],s=[np.array(
+
+
+\"""
+class L_sinc_lowpass:
+    def __init__(self,delay=0,maxD=4800):
+        self.delay = [delay]
+        self.maxD = maxD
+        self._keepmeinscope = None
+    def plot(self,df=None):
+        if df == None:
+            df = 10
+        if type(df) in [float,int]:
+            b = df
+            df = lambda x: self.maxD*(x*b**(x-1))
+        import matplotlib.pyplot as plt
+        from matplotlib.widgets import Slider
+        plt.figure()
+        axm = plt.axes([0.1, 0.3, .8, .4])
+        sm = Slider(axm, 'delay', 0, 1, valinit=0)
+        def update(val,d=self.delay):
+            v = df(sm.val)
+            d[0] = int(v)
+            sm.label.set_text("delay:"+str(d[0]))
+        sm.on_changed(update)
+        self._keepmeinscope = update
+        return plt
+    def __call__(self,start=[]):
+        def do(v,i=[self.delay[0]],d=self.delay,b=(start+[0]*(self.maxD+1))[:self.maxD+1],keepmeinscope=self):
+            b[i[0]] = v
+            i[0] = (i[0]+1)%len(b)
+            return b[(i[0]-d[0]-1)%len(b)]
+        return do
+
+
+
+    
+    
+class L_rbiquad:#real biquad
+    def __init__(self):
+        self.gzp = [1,0,0] #gain,zero,pole
+                           #zero and pole are complex
+    def __call__(self,state=[]):
+        state = (state+[0,0])[:2]
+        def f(v,s=state,d=self.gzp):
+            v -= s[0]*a[0]+s[1]*a[1]
+            v,s[0],s[1] = v*b[0]+s[0]*b[1]+s[1]*b[2],v,s[0]
+            return v*d[0]
+        return f
+    def plot(self,plotN=1<<6):
+        pass
+    
+#http://sites.music.columbia.edu/cmc/MusicAndComputers/chapter4/04_09.php
+#def Karplus_Strong(l,d=.999,s=None):
+#    if s == None:
+#        s = [(random.random()-.5)*(1+1j) for i in range(l)]
+#    def do(v):
+"""
+
+
+
+
+
+    
+
+def capMagl(cap=1):
+    def do(v,c=[cap]):
+        if abs(v) > c[0]:
+            return c[0]*v/abs(v)
+        return v
+    return do
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def prerun(g,n):
     for i in n:

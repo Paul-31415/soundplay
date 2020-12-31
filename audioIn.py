@@ -22,16 +22,26 @@ class _audioFile:
                 self.conv = lambda x: int.from_bytes(x,"little",signed=True)/self.d
             else:
                 self.conv = lambda x: int.from_bytes(x[0:2],"little",signed=True)/self.d+1j*int.from_bytes(x[2:4],"little",signed=True)/self.d
-    def __iter__(self):
+    def __iter__(self,start=0):
         with audioread.audio_open(self.path) as f:
             n = f.channels
             d = 1<<15
+            fct = 2 if n == 1 else 4
+            def fit(f,s = start*fct):
+                fi = iter(f)
+                b = next(fi)
+                while s >= len(b):
+                    s -= len(b)
+                    b = next(fi)
+                yield b[s:]
+                for b in fi:
+                    yield b
             if n == 1:
-                for buf in f:
+                for buf in fit(f):
                     for i in range(len(buf)>>1):
                         yield int.from_bytes(buf[i<<1:(i+1)<<1],"little",signed=True)/d
             else:
-                for buf in f:
+                for buf in fit(f):
                     for i in range(len(buf)>>2):
                         yield int.from_bytes(buf[i<<2:(i<<2)+2],"little",signed=True)/d+1j*int.from_bytes(buf[(i<<2)+2:(i+1)<<2],"little",signed=True)/d
     def __len__(self):
@@ -49,10 +59,12 @@ class _waveFile:
         self.d = 1
         self.w = 0
         self.n = 0
-    def __iter__(self):
+    def __iter__(self,start=0):
         with wave.open(open(self.path,"rb"),"rb") as wav:
             n = wav.getnchannels()
             w = wav.getsampwidth()
+            if start:
+                wav.readframes(start)
             r = wav.readframes(1)
             d = 1<<(8*w-1)
             if n == 1:
@@ -121,8 +133,9 @@ formats = {"wav":_waveFile,
 }  
     
 class audioFile:
-    def __init__(self,path,bpm=None,zeroPad = True, loop=False,tsr = None):
+    def __init__(self,path,bpm=None,startOffset=0,zeroPad = True, loop=False,tsr = None):
         self.bpm = bpm
+        self.start = startOffset
         self.path = path
         self.zeroPad = zeroPad
         self.loop = loop
@@ -148,7 +161,7 @@ class audioFile:
         if not self.loaded:
             self.load()
         def g(self,s):
-            for i in s:
+            for i in s.__iter__(self.start):
                 yield i
             if self.zeroPad:
                 while 1:
@@ -164,6 +177,7 @@ class audioFile:
         if not self.loaded:
             self.load()
         i *= self.file.rate/self.rate
+        i += self.start
         if self.zeroPad and (int(i) < 0 or int(i) >= len(self.file)):
             return 0
         else:

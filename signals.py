@@ -20,6 +20,45 @@ def fracApprox(r,dmax=20):
         nd = lb[1]+ub[1]
     return [lb,ub][abs(ub[0]/ub[1]-r)<abs(lb[0]/lb[1]-r)]
 
+def fracApproxGen(r):
+    lb = (int(r),1)
+    ub = (lb[0]+1,1)
+    nd = lb[1]+ub[1]
+    prev = (0,0)
+    while 1:
+        res = [lb,ub][abs(ub[0]/ub[1]-r)<abs(lb[0]/lb[1]-r)]
+        if prev != res:
+            yield res
+            prev = res
+        nb = (lb[0]+ub[0],nd)
+        v = nb[0]/nb[1]
+        if r < v:
+            ub = nb
+        elif r == v:
+            return nb
+        else:
+            lb = nb
+        nd = lb[1]+ub[1]
+def fracBoundsGen(r):
+    lb = (int(r),1)
+    ub = (lb[0]+1,1)
+    nd = lb[1]+ub[1]
+    prev = (0,0)
+    while 1:
+        res = [lb,ub][abs(ub[0]/ub[1]-r)<abs(lb[0]/lb[1]-r)]
+        if prev != res:
+            yield (lb,ub)
+            prev = res
+        nb = (lb[0]+ub[0],nd)
+        v = nb[0]/nb[1]
+        if r < v:
+            ub = nb
+        elif r == v:
+            return nb
+        else:
+            lb = nb
+        nd = lb[1]+ub[1]
+
 
 def sinc(x,wf=0):
     if wf != 0:

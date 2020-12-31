@@ -26,11 +26,15 @@ def c(g):
 
 import audioIn as aud
 from filters import *
+import inputSources as IS
 from distort import *
 flt = IIR()
 import fmsynth as fm
 import signals as sig
 from itools import *
+
+from calc import *
+
 
 from songs import *
 

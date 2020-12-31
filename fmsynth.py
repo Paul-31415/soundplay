@@ -57,6 +57,147 @@ lsaw = lm(nsaw)
 ltri = lm(ntri)
 lsqr = lm(nsquare)
 
+_reserved = []
+def polyvars(varstr):
+    return [Polynomial(i) for i in varstr]
+class Polynomial:
+    def __init__(self,coef,var="x"):
+        if type(coef) == str:
+            var = coef
+            coef = [0,1]
+        self.a = coef
+        self.var = var
+        self.trim()
+    def trim(self):
+        while len(self.a):
+            if self.a[-1] == 0:
+                self.a = self.a[:-1]
+            else:
+                break
+    def simplified(self,tv=None):
+        if tv == None:
+            tv = self.var
+        if tv == self.var:
+            r = Polynomial([],tv)
+            x = Polynomial(tv)
+            xa = 1
+            for t in self.a:
+                if type(t) == Polynomial:
+                    r += t.simplified(tv)*xa
+                else:
+                    r += t*xa
+                xa *= x
+        else:
+            r = Polynomial([],tv)
+            x = Polynomial(self.var)
+            xa = 1
+            for t in self.a:
+                if type(t) == Polynomial:
+                    r += t.simplified(tv).__mul__(xa)
+                else:
+                    r += t*xa
+                xa *= x
+        return r
+    def __call__(self,vrs):
+        if type(vrs) != dict:
+            vrs = {self.var:vrs}
+        if self.var in vrs:
+            x = vrs[self.var]
+            v = 0
+            xa = 1
+            for t in self.a:
+                if type(t) == Polynomial:
+                    t = t(vrs)
+                v += xa*t
+                xa *= x
+            return v
+        return Polynomial([t(vrs) if type(t) == Polynomial else t for t in self.a],self.var)
+    def __getitem__(self,i):
+        if i>=len(self):
+            return 0
+        return self.a[i]
+    def __setitem__(self,i,v):
+        if i>=len(self):
+            self.a += [0]*(i-len(self))+[v]
+        else:
+            self.a[i] = v
+        self.trim()
+    def __neg__(self):
+        return Polynomial([-i for i in self.a],self.var)
+    def __radd__(self,o):
+        return self.__add__(o)
+    def __add__(self,o):
+        if type(o) == Polynomial and o.var == self.var:
+            return self.padd(o)
+        return self.npadd(o)
+    def padd(self,o):
+        return Polynomial(sumPolyn(self.a,o.a),self.var)
+    def npadd(self,o):
+        if len(self.a):
+            return Polynomial([self.a[0]+o]+self.a[1:],self.var)
+        return Polynomial([o],self.var)
+    def __rsub__(self,o):
+        return -self.__sub__(o)
+    def __sub__(self,o):
+        if type(o) == Polynomial and o.var == self.var:
+            return self.psub(o)
+        return self.npsub(o)
+    def psub(self,o):
+        return self.padd(-o)
+    def npsub(self,o):
+        if len(self.a):
+            return Polynomial([self.a[0]-o]+self.a[1:],self.var)
+        return Polynomial([-o],self.var)
+    def __rmul__(self,o):
+        return self.__mul__(o)
+    def __mul__(self,o):
+        if type(o) == Polynomial and o.var == self.var:
+            return self.pmul(o)
+        return self.npmul(o)
+    def pmul(self,o):
+        return Polynomial(prodPolyn(self.a,o.a),self.var)
+    def npmul(self,o):
+        if len(self.a):
+            return Polynomial([e*o for e in self.a],self.var)
+        return Polynomial([],self.var)
+    #def __divmod__(self,o):
+    #def __repr__(self,var=None):
+    #    if var == None:
+    #        var = self.var
+    #    return f"polyn({var}) = "+" + ".join((f"({self.a[i]})"+["",f"{var}"][i>0]+["",f"**{i}"][i>1] for i in range(len(self.a))))
+    def __repr__(self,var=None):
+        if var == None:
+            var = self.var
+        return f"p({var})="*0+" + ".join(((f"({self.a[i]})" if self.a[i] != 1 else ["1",""][i>0])+["",f"{var}"][i>0]+["",f"**{i}"][i>1] for i in range(len(self.a)) if self.a[i] != 0))
+    def deriv(self):
+        return Polynomial([self.a[i+1]*(i+1) for i in range(len(self.a)-1)],self.var)
+    def integ(self,k=0):
+        return Polynomial([k]+[self.a[i]*(1/(i+1)) for i in range(len(self.a))],self.var)
+    def convolve(self,o):
+        #integ of self(t-x)o(t) dt
+        #want first arg to be x, second to be bounds
+        #so, 
+        x = Polynomial('x')
+        t = Polynomial('t')
+        integrand = Polynomial([self(t-x)*o(t)],'t')
+        return integrand.simplified('t').integ()
+    def __len__(self):
+        return len(self.a)
+    def __eq__(self,o):
+        if type(o) == Polynomial:
+            if len(o) != len(self) or o.var != self.var:
+                return False
+            for i in range(len(self)):
+                if self.a[i] != o.a[i]:
+                    return False
+            return True
+        if type(o) == float or type(o) == int or type(o) == complex:
+            return len(self) <= 1 and (self.a+[0])[0] == o
+    def __matmul__(self,o):
+        return self.convolve(o)
+    def plot(self,*args):
+        plotPoly(self.a,*args)
+    
 def evalPolyn(polyn,x):
     v = 0
     xa = 1
@@ -83,7 +224,7 @@ def prodPolyn(p1,p2):
         for j in range(len(p2)):
             res[i+j] += p1[i]*p2[j]
     return res
-def composePolyn(p1,p2):
+def composePolyn(p1,p2): #retuns p1(p2(x))
     px = [1]
     pr = []
     for i in p1:
@@ -116,7 +257,51 @@ def softGCD(a,b,f=.01):
     if abs(b)<=f:
         return a
     return softGCD(b,a%b,f)
+
+def convPolyFrags(p0,p1,l0,l1):
+    #convolves 2 polynomial fragments
+    if l0 > l1:
+        return convPolyFrags(p1,p0,l1,l0)
+    #l0 ≤ l1
+    times = [-l0,0,l1-l0]
+    #moving = composePolyn(p0,[t-x])
+
+    def xify(v):
+        return Polynomial([v],'x').simplified('x')
     
+    p_0 = Polynomial(p0,'x')
+    p_1 = Polynomial(p1,'x')
+    x = Polynomial('x')
+    conv = p_0@p_1
+    a,b,c = conv(l0+x)-conv(0),conv(l0+x)-conv(x),conv(l1)-conv(x)
+    a,b,c = [xify(xify((a,b,c)[i])(x+times[i])) for i in range(3)]
+    if l1 != l0:
+        return PiecewizePoly([[],a.a,b.a,c.a,[]],[-math.inf]+times+[l1],0)
+    return PiecewizePoly([[],a.a,c.a,[]],[-math.inf]+times[:2]+[l1],0)
+    
+    
+
+def plotPoly(p,t0=0,t1=1,res=50):
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(nrows=1, ncols=1)
+    st = p[0]
+    end = evalPolyn(p,t1-t0)
+    mid = []
+    ts = []
+    if len(p) > 2:
+        for j in range(1,res):
+            t = (t1-t0)*j/res
+            ts += [t+t0]
+            mid += [evalPolyn(p,t)]
+    ts = [t0]+ts+[t1]
+    ys = [st]+mid+[end]
+    plt.plot(ts,[i.real for i in ys],linestyle='-',color=(.3,.3,1), linewidth=2)
+    plt.plot(ts,[i.imag for i in ys],linestyle='-',color=(1,.3,.3), linewidth=2)
+    plt.show(block=0)
+
+#todo: closed form convolution
+#   perhaps use @ (__matmul__)
+#todo: closed form composition? possible? not always: requires root finding
 class PiecewizePoly:
     def __init__(self,polys = [[]],times=[0],mod=1):
         self.times = times
@@ -153,6 +338,31 @@ class PiecewizePoly:
             val = evalPolyn(res_p[i-1],res_t[i]-res_t[i-1])
             res_p[i][0] = val#-evalPolyn(res[i][1],res[i][0]) #not needed with new def
         return PiecewizePoly(res_p,res_t,self.mod)
+    def timeshift(self,s):
+        assert self.mod==0
+        for i in range(len(self.times)):
+            self.times[i] -= s
+        return self
+    def timescale(self,s):
+        self.mod *= s
+        for i in range(len(self.times)):
+            self.times[i] *= s
+            self.polys[i] = composePolyn(self.polys[i],[0,1/s])
+        return self
+    def convolve(self,o,fudgefactor = .001):
+        ts = self.times + [self.mod if self.mod else math.inf]
+        to = o.times + [o.mod if o.mod else math.inf]
+        result = PiecewizePoly([[]],[-math.inf],0)
+        for i in range(len(self.polys)):
+            for j in range(len(o.polys)):
+                pc = convPolyFrags(self.polys[i],o.polys[j],ts[i+1]-ts[i],to[j+1]-to[j])
+                result += pc.timeshift(ts[i]-to[j])
+        #now do moddy stuff
+        return result
+    
+    
+    def __matmul__(self,o,fudgefactor = .001):
+        return self.convolve(o,fudgefactor)
     def __lmbdWr__(self):
         return lmbdWr(self)
     def __iterWr__(self):
@@ -171,6 +381,32 @@ class PiecewizePoly:
         return PiecewizePoly(res_p,res_t,self.mod)
     def graph(self,w=40,h=20,lo=-2,hi=2):
         gr.graph(self,0,self.mod,lo,hi,w,h)
+    def plot(self,res=50):
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(nrows=1, ncols=1)
+        dash = 0
+        for i in range(len(self.polys)):
+            dash = 1-dash
+            t0 = self.times[i]
+            if t0 == -math.inf:
+                t0 = self.times[i+1]-1
+            t1 = (self.times+[self.mod if self.mod != 0 else self.times[-2]+1])[i+1]
+            p = self.polys[i]
+            st = (p+[0])[0]
+            end = evalPolyn(p,t1-t0)
+            mid = []
+            ts = []
+            if len(p) > 2:
+                for j in range(1,res):
+                    t = (t1-t0)*j/res
+                    ts += [t+t0]
+                    mid += [evalPolyn(p,t)]
+            ts = [t0]+ts+[t1]
+            ys = [st]+mid+[end]
+            plt.plot(ts,[i.real for i in ys],linestyle='-',color=(.3*dash,.3*dash,1), linewidth=2)
+            plt.plot(ts,[i.imag for i in ys],linestyle='-',color=(1,.3*dash,.3*dash), linewidth=2)
+        plt.show(block=0)
+        
     def mag2(self):
         sqd = PiecewizePoly([prodPolyn(p,p) for p in self.polys],[t for t in self.times],self.mod+1).integ()
         return (sqd(self.mod)-sqd(0))/self.mod
@@ -181,6 +417,37 @@ class PiecewizePoly:
         return PiecewizePoly([[i*factor for i in p] for p in self.polys],[t for t in self.times],self.mod)
     def __add__(self,o,fudgefactor = .001):
         if type(o) == PiecewizePoly:
+            if self.mod == 0:
+                assert o.mod == 0
+                res_t = [-math.inf]
+                res_p = [sumPolyn(self.polys[0],o.polys[0])]
+                si = 0
+                oi = 0
+                sts = self.times + [math.inf]
+                ots = o.times + [math.inf]
+                sp = self.polys + [[]]
+                op = o.polys + [[]]
+                while si < len(self.times) and oi < len(o.times):
+                    st,ot = sts[si+1],ots[oi+1]
+                    if st < ot:
+                        si += 1
+                        res_t += [st]
+                        res_p += [sumPolyn(sp[si],
+                                           composePolyn(op[oi],[st-ot,1]))]
+                    elif st > ot:
+                        oi += 1
+                        res_t += [ot]
+                        res_p += [sumPolyn(composePolyn(sp[si],[ot-st,1]),
+                                           op[oi])]
+                    else:
+                        si += 1
+                        oi += 1
+                        res_t += [st]
+                        res_p += [sumPolyn(sp[si],op[oi])]
+                return PiecewizePoly(res_p,res_t,0)
+                    
+            else:
+                assert o.mod != 0
             gcd = softGCD(self.mod,o.mod,fudgefactor*(self.mod*o.mod)**.5) 
             lcm = self.mod*o.mod/gcd 
             t = 0 
@@ -328,7 +595,17 @@ def ditherPoly(p,rate=440/48000,dd=1):
         yield p(t+dd*rate*random())
 
         
-
+def gaussApprox(mean=0,spread=1,iters=3):
+    s = spread/iters
+    blip = PiecewizePoly([[],[1/s],[]],[-math.inf,0,s],0)
+    acc = blip
+    for b in bin(iters)[3:]:
+        acc.plot()
+        acc @= acc
+        if b == '1':
+            acc @= blip
+    return acc.timeshift(mean)
+        
 
 def plinConnectDots(dat,speed=1):
     polys = []

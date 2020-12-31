@@ -118,6 +118,9 @@ class ArrayFile:
 class FieldDef:
     def __init__(self,name,sdef,include = lambda vers,ns:True, post=lambda x:x):
         self.type = sdef
+        if type(self.type) == list:
+            print(name,self.type)
+            assert 0
         self.name = name
         self.include = include
         self.post = post
@@ -134,6 +137,7 @@ class StructDef:
     def __init__(self,fields):
         self.fields = fields
         #self.fieldmap = {fields[i].name:i for i in range(len(fields))}
+        
         self.fieldmap = {f.name:f for f in self.fields}
     def field(self,k):
         return self.fields[self.fieldmap[k]]
@@ -164,7 +168,7 @@ class StructDef:
     def lazy_getitem(self,slf,k):
         fields_addrs,field_cache = slf.cache
         if not (k in field_cache):
-            f = slf.fieldmap[k]
+            f = self.fieldmap[k]
             field_cache[k] = f.post(slf.field(k).val())
         return field_cache[k]
     def lazy__len__(self,slf):
@@ -190,7 +194,7 @@ class ProgramaticStructDef:
     def cache(self):
         return None
     def lazyrepr(self,val_cache):
-        if self.val_cache == None:
+        if val_cache == None:
             return repr(self)
         return repr(val_cache)
     def calcsize(self,slf):
@@ -215,7 +219,7 @@ class StructArrayDef:
         arr_cache,arr_val_cache,arr_pos = c
         arrs = ""
         if arr_cache != None:
-            for i in range(len(.arr_cache)):
+            for i in range(len(arr_cache)):
                 if arr_cache[i] != None:
                     if arr_val_cache[i] != None:
                         arrs += repr(arr_val_cache[i])
@@ -230,7 +234,7 @@ class StructArrayDef:
     def calcsize(self,slf):
         s = 0
         for i in range(len(slf)):
-            s += self.field(i).len()
+            s += slf.field(i).len()
         return s
     def lazy_array_work(self,slf,i=None):
         arr_cache,arr_val_cache,arr_pos = slf.cache
@@ -260,14 +264,14 @@ class StructArrayDef:
             v = arr_val_cache[k%len(slf)] = self.post(slf.field(k%len(slf)).val())
         return v
     def lazy__len__(self,slf):
-        self.lazy_array_work(None)
-        return len(self.cache[0])
+        self.lazy_array_work(slf,None)
+        return len(slf.cache[0])
     def lazy_keys(self,slf):
         return range(len(slf))
 
     def lazy_field(self,slf,k,default=None):
-        self.lazy_array_work(k%len(slf))
-        return self.cache[0][k%len(slf)]
+        self.lazy_array_work(slf,k%len(slf))
+        return slf.cache[0][k%len(slf)]
 
 class StructSwitch:
     def __init__(self,sf):
@@ -298,6 +302,64 @@ class StructSwitch:
         self.do(slf)
         return slf.cache.field(k,default)
 
+
+
+
+
+
+    
+def defparser(desc):
+    if type(desc) == list:
+        return StructDef([fieldparser(e) for e in desc])
+    
+def fieldparser(desc):
+    name = desc[0]
+    tp = desc[1]
+    post = lambda x: x
+    if type(tp) != str:
+        tp = defparser(tp)
+    else:
+        post = lambda x:x[0] if len(x) == 1 else x
+    ver = lambda v,n:True
+    if len(desc) > 2:
+        if type(desc[2]) == int:
+            ver = lambda v,n,l=desc[2]: v >= l
+        elif type(desc[2]) == tuple:
+            ver = lambda v,n,l=desc[2]: l[0] <= v <= l[1]
+        else:
+            ver = desc[2]
+        if len(desc) > 3:
+            post = desc[3]
+    if type(name) == str:
+        return FieldDef(name,tp,ver,post)
+    elif type(name) == list:
+        adef = name
+        name = adef[0]
+        num = adef[1]
+        if type(num) == str:
+            num = lambda v,n,l=num: n.parent[l]
+        elif type(num) == int:
+            num = lambda v,n,l=num: l
+        elif type(num) == tuple:
+            def t(v,n,l=num):
+                for i in range(l[0]):
+                    n = n.parent
+                for k in l[1:]:
+                    n = n[k]
+                return n
+            num = t
+        apost = (lambda x: x) if len(adef) < 3 else adef[3]
+        return FieldDef(name,StructArrayDef(tp,num,apost),ver,post)
+            
+    
+
+    
+
+
+
+
+
+    
     
     
 class LazyStruct:
@@ -353,7 +415,7 @@ class FTMBlock(LazyStruct):
         super().__init__(d.shifted(24),defn,version,p)
         self.header = d
         self.name = name.rstrip(b'\x00').decode()
-        self.lenCache = length
+        self.trueLength = length
     def __repr__(self):
         return "<FTMBlock "+self.name+" at "+hex(id(self))+">"
 
@@ -401,17 +463,70 @@ FTMHeaderDef = StructDef([FieldDef("_tracks","<B",lambda v,n: v>=2,lambda x:x[0]
                                      lambda v,n: n.parent.parent['PARAMS']['channels'],
                                      ),                                 
                                  trues,lambda x: {e["id"]:e["numEffects"] for e in x})])
+
+
+FTM_2A03_init = defparser([
+    ('_numSeqs','<I'),
+    (["seqs",'_numSeqs'],[('used?','<B'),('index','<B')]),
+    (["notes",lambda v,n: [96,72][v==1]],[('index','<B'),('pitch','<B'),('delta','<B',6)])
+])
+FTM_VRC6_init = defparser([
+    ('_numSeqs','<I',2),
+    (['seqs','_numSeqs'],[('used?','<B'),('index','<B')],2)
+])
+FTM_VRC7_init = defparser([
+    ('patch','<I',2),
+    ('MML','<8s',2)
+])
+FTM_FDS_init = defparser([
+    ('wave','<64s',3),
+    ('mod','<32s',3),
+    ('mod rate','<i',3),
+    ('mod depth','<i',3),
+    ('mod delay','<i',3),
+    (['seqs',3],[('_len','<B'),('loop point','<i'),('release point','<i'),('arpeggio type','<i'),
+                 (['content','_len'],[('v','<B')])],3)
+])
+FTM_N163_init = defparser([
+    ('_numSeqs','<I',2),
+    (['seqs','_numSeqs'],[('used?','<B'),('index','<B')],2),
+    ('wave size','<I',2),
+    ('wave position','<I',2),
+    ('_numWaves','<I',2),
+    (['waves','_numWaves'],[(['content',(2,'wave size')],[('v','<B')])],2)
+])
+
+FTMInstrDefinitions = [FTM_2A03_init,FTM_VRC6_init,FTM_VRC7_init,FTM_FDS_init,FTM_N163_init]
+
 FTMInstrumentsDef = StructDef([
     FieldDef("_instruments","<I",trues,first),
     FieldDef("instruments",
              StructArrayDef(
-                 StructDef(
+                 StructDef([
+                     FieldDef("index","<I",trues, first),
+                     FieldDef("chip type","<B",trues, first),
+                     FieldDef("inst",
+                              StructSwitch(
+                                  lambda ns: StructDef(FTMInstrDefinitions[ns.parent["chip type"]-1].fields+[
+                                      FieldDef("_name len","<I",trues,first),
+                                      FieldDef("name",
+                                               StructArrayDef(StructDef([FieldDef('v','<B',trues,first)]))
+                                               ,trues,lambda x: "".join((chr(e['v']) for e in x)))
+                                  ]),
+                              )
+                              ,trues)]),
+                 lambda v,n: n.parent.parent['PARAMS']['channels'],
+             ),
+             trues,lambda x: {e['index']:e['inst'] for e in x})
+])
+                 
                      
 
 class FTM:
     field_types = {"PARAMS":FTMParamsDef,
                    "INFO":FTMInfoDef,
                    "HEADER":FTMHeaderDef,
+                   "INSTRUMENTS":FTMInstrumentsDef,
                    }
     def __init__(self,f):
         self.dat = ArrayFile(f)
