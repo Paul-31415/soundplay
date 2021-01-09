@@ -1392,4 +1392,108 @@ def swapperl(sg=[12000],i0=0):
 from random import random
 def embiggen(a,l,n=10,fd = lambda i: .995+random()/100,md = lambda i: (random()*2+random*2j)-(1+1j)):
     r = a*l
+
+
+
+def pred_nearest():
+    def p(v):
+        return v
+    return p
+def pred_kernel(k=[2,-1]):
+    def p(v,h=[0]*len(k),k=k,o=[0]):
+        h[o[0]] = v
+        v *= k[0]
+        for i in range(1,len(k)):
+            v += h[(o[0]+i)%len(k)]*k[i]
+        o[0] = (o[0]-1)%len(k)
+        return v
+    return p
+    
+
+
+    
+def ms_slowest(invert=False):
+    def f(a,b,p=[0],i=invert):
+        w = (abs(a-p[0])>abs(b-p[0]))^i
+        p[0] = [a,b][w]
+        return w
+    return f
+def arg(n):
+    return math.atan2(n.imag,n.real)
+def ms_least_spinny(invert=False):
+    def f(a,b,p=[0],i=invert,p2=2*math.pi):
+        w = (((arg(a)-p[0])%p2)>((arg(b)-p[0])%p2))^i
+        p[0] = arg([a,b][w])
+        return w
+    return f
+def ms_predicted(predictor=lambda x: x,invert=False):
+    def f(a,b,p=[0],pd=predictor,i=invert):
+        pred = pd(p[0])
+        w = (abs(a-pred)>abs(b-pred))^i
+        p[0] = [a,b][w]
+        return w
+    return f
+def ms_length():
+    def f(a,b,p=[0,0]):
+        which = p[0]>p[1]
+        s = [a,b][which]
+        p[which] += abs(s)
+        return which
+    return f
+def ms_dlength():
+    def f(a,b,p=[0,0,0,0]):
+        which = p[2]>p[3]
+        s = [a,b][which]
+        p[2+which] += abs(s-p[which])
+        p[which] = s
+        return which
+    return f
+
+def merge_sort(g1,g2,f=ms_slowest(),emit_all=True):
+    v2 = None
+    v1 = None
+    g = None
+    while 1:
+        if v1 == None:
+            try:
+                v1 = next(g1)
+            except StopIteration:
+                v = v2
+                g = g2
+                break
+        if v2 == None:
+            try:
+                v2 = next(g2)
+            except StopIteration:
+                v = v1
+                g = g1
+                break
+        if f(v1,v2):
+            v = v2
+            v2 = None
+        else:
+            v = v1
+            v1 = None
+        yield v
+    if emit_all:
+        if v != None:
+            yield v
+        for v in g:
+            yield v
+            
+            
+
+
+def exp_dpcm_encode(a=0.01,h=1,l=-1):
+    def enc(v,p=[0],a=a,d=h-l,l=l):
+        r = l+1j*l+((v.real>p[0].real)+1j*(v.imag>p[0].imag))*d
+        p[0] -= (p[0]-r)*a
+        return r
+    return enc
+def exp_dpcm_decode(a=0.01,h=1,l=-1):
+    def dec(v,p=[0],a=a):
+        p[0] += (v-p[0])*a
+        return p[0]
+    return dec
+        
     

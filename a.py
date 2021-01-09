@@ -116,3 +116,18 @@ fld4 = filt.feedbackl(filt.chainl(filt.delayl(22154*4-2000),di.tritapsl(.5,2*200
 fla = filt.feedbackl(filt.chainl(filt.delayl(22154)),di.maxholdfuncl(lambda v,m: v/(m+1),.995),o(lambda x:x))
 flao = filt.feedbackl(filt.chainl(filt.delayl(22154-2000),filt.parrl(filt.delayl(2000),di.tritapsl(.5,2*2000))),di.maxholdfuncl(lambda v,m: v/(m+1),.995),o(lambda x:x))
 
+def deriv(g):
+    p = 0
+    for v in g:
+        yield v-p
+        p=v
+def integ(g,a=1):
+    v = 0
+    for i in g:
+        v *= a
+        v += i
+        yield v
+
+from audioOut import float_out,alaw_out
+from pitch import *
+from matplotThings import live_graph

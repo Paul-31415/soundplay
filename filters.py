@@ -1439,3 +1439,16 @@ def cb(g,f=lambda :None):
     for i in g:
         yield i
         f()
+
+
+def deriv(g):
+    p = 0
+    for v in g:
+        yield v-p
+        p=v
+def integ(g,a=1):
+    v = 0
+    for i in g:
+        v *= a
+        v += i
+        yield v

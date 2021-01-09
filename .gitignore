@@ -99,3 +99,23 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+
+# audio formats
+*.aiff
+*.wav
+*.wave
+*.mid
+*.midi
+*.ndat
+*.snd
+*.mp3
+
+*.16bm
+*.16bs
+*.8bm
+*.hfs
+
+# emacs autosaves
+*~
+*\#

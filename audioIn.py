@@ -50,7 +50,25 @@ class _audioFile:
         div = (4096>>1)//self.n
         mul = 2*self.n
         return self.conv(self.dat[i//div][(i*mul)%4096:(i*mul%4096)+mul])
-        
+    def reverse(self):
+        mul = 2*self.n
+        for bufi in range(len(self.dat)-1,-1,-1):
+            buf = self.dat[bufi]
+            for i in range(len(buf)//mul-1,-1,-1):
+                yield self.conv(buf[i*mul:(i+1)*mul])
+    def start(self,d=0):
+        if type(d) == float:
+            d = int(self.length*d)
+        div = (4096>>1)//self.n
+        bi = d//div
+        oi = d%div
+        mul = 2*self.n
+        for b in range(bi,len(self.dat)):
+            buf = self.dat[b]
+            for i in range(oi,len(buf)//mul):
+                yield self.conv(buf[i*mul:(i+1)*mul])
+            oi = 0
+            
 class _waveFile:
     def __init__(self,path):
         self.path = path
@@ -133,7 +151,7 @@ formats = {"wav":_waveFile,
 }  
     
 class audioFile:
-    def __init__(self,path,bpm=None,startOffset=0,zeroPad = True, loop=False,tsr = None):
+    def __init__(self,path,bpm=None,startOffset=0,zeroPad = False, loop=False,tsr = None):
         self.bpm = bpm
         self.start = startOffset
         self.path = path
@@ -157,6 +175,11 @@ class audioFile:
         if self.rate == None:
             self.rate = self.file.rate
         self.loaded = True
+    def play(self,d=0):
+        if not self.loaded:
+            self.load()
+        for i in self.file.start(d):
+            yield i
     def __iter__(self):
         if not self.loaded:
             self.load()
@@ -196,3 +219,9 @@ class audioFile:
         return self[i.real].real+self[i.imag].imag*1j
     def spb(self):
         return 60*self.rate/self.bpm
+    def reverse(self):
+        if not self.loaded:
+            self.load()
+        for v in self.file.reverse():
+            yield v
+        

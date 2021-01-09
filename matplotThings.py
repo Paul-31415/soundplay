@@ -1,5 +1,24 @@
 
 
+class nogc:
+    def __init__(self,*stuff):
+        self.stuff = stuff
+    def __repr__(self):
+        return "nogc(...)"
+
+def live_graph(dfuncs=()):
+    import matplotlib.pyplot as plt
+    from matplotlib.animation import FuncAnimation
+    fig, ax = plt.subplots(nrows=1, ncols=1)
+    p = [ax.plot(f(-1))[0] for f in dfuncs]
+    def update(frame,df=dfuncs,p=p):
+        for i in range(len(p)):
+            p[i].set_ydata(df[i](frame))
+        return p
+    ani = FuncAnimation(fig, update,blit=True)
+    plt.show(block=0)
+    return plt,nogc(ani,update,p,fig,ax)
+
 
 def oscope(gen,spf=1024,upsampleTo=4096,ms=.5,a=.1):
     import scipy
