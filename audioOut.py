@@ -1,6 +1,7 @@
 import aifc
 import random
 import math
+import numpy as np
 
 def frame(v,b=2,c=2):
     r = []
@@ -31,13 +32,36 @@ def alaw_c(v):
         re = 0
     return ((not sign)<<7)|(re<<4)|(0xf & (mantissa>>19))
 
+def valaw_c(v):
+    bits = np.frombuffer(v.astype('<f').tobytes(),dtype="<I")
+    sign = bits>>31
+    exponent = (bits>>23)&0xff
+    mantissa = ((bits&0x7fffff) | (0x800000)).astype('l')
+    se = exponent.astype('h')-127
+    re = se+3
+    r = np.zeros(len(bits),dtype='B')
+    ov = re>7
+    r[ov] = ((sign[ov])<<7)^0xff
+    un = re<=0
+    mantissa[un] >>= 1-re[un]
+    re[un] = 0
+    nv = ~ov
+    r[nv]=(((sign[nv])<<7)|(re[nv]<<4)|(0xf & (mantissa[nv]>>19)))^0x80
+    return r
+    
+
 mono = (1,lambda v:(v.real,))
 def float_out(g,name="out.wav",rate=48000,show=0,phony=(2,lambda v:(v.real,v.imag))):
-    wav_out(g,name,rate,show,phony+('<'+str(phony[0])+'f',),fmt=(3,32),dsize=4)
+    if type(g) == np.ndarray:
+        g = np.array(phony[1](g),dtype="<f")
+    wav_out(g,name,rate,show,phony+('<'+str(phony[0])+'f',),fmt=(3,32),dsize=4,order='f')
 def alaw_out(g,name="out.wav",scale=1,rate=48000,show=0,phony=(2,lambda v:(v.real,v.imag))):
-    phony = (phony[0],lambda v,p=phony[1],s=scale: [0x55^alaw_c(e*s) for e in p(v)])
-    wav_out(g,name,rate,show,phony+('<'+str(phony[0])+'B',),fmt=(6,8),dsize=1)
-def wav_out(g,name="out.wav",rate=48000,show=0,phony=(2,lambda v:(v.real,v.imag),'<ff'),fmt=(3,32),dsize=4):
+    if type(g) == np.ndarray:
+        g = np.array([0x55 ^ valaw_c(e) for e in phony[1](g)],dtype='B')
+    else:
+        phony = (phony[0],lambda v,p=phony[1],s=scale: [0x55^alaw_c(e*s) for e in p(v)])
+    wav_out(g,name,rate,show,phony+('<'+str(phony[0])+'B',),fmt=(6,8),dsize=1,order='f')
+def wav_out(g,name="out.wav",rate=48000,show=0,phony=(2,lambda v:(v.real,v.imag),'<ff'),fmt=(3,32),dsize=4,order='f'):
     import struct
     with open(name,"wb") as f:
         f.write(b'RIFF')
@@ -61,6 +85,10 @@ def wav_out(g,name="out.wav",rate=48000,show=0,phony=(2,lambda v:(v.real,v.imag)
             f.seek(54)
             f.write(struct.pack("<I",s*bpf))
             return r
+        if type(g) == np.ndarray:
+            b = g.tobytes(order)
+            f.write(b)
+            return fin(len(g))
         for v in g:
             f.write(struct.pack(phony[2],*phony[1](v)))
             if show and (s%rate == 0):

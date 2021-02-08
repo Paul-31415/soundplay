@@ -1,4 +1,4 @@
-from prng import rrca8,rand8,rand16,rand24
+from prng import rrca8,rand8,rand16,rand24,vrand16
 
 
 

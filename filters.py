@@ -705,6 +705,15 @@ def iirIA(l=3,plotN = 1<<8,ms=.5):#interactive iir filter arrays
     """
     return plt,A,B,refs
 
+class iiir:
+    def __init__(self,l=3,*a):
+        self.plt,self.a,self.b,self.nogc = iirIA(l,*a)
+        self.filt = iiral(self.a,self.b)
+    def __call__(self,v):
+        return self.filt(v)
+    def show(self):
+        self.plt.show(block=0)
+        
 
 def firl(k=[1]):
     def f(v,i=[0],k=k,s=[0]*(len(k)-1)):
@@ -1143,6 +1152,189 @@ class L_delay:
         self._keepmeinscope = update
         return plt
 
+class L_iir:
+    def __init__(self,gain=1,poles=[],zeros=[]):
+        self.poles = poles
+        self.zeros = zeros
+        self.gain = gain if type(gain) is list else [gain,1]
+        self.a = [None]
+        self.b = [None]
+        self.update()
+    def order(self):
+        return max(len(self.poles),len(self.zeros))
+    def copy(self):
+        return L_iir(self.poles,self.zeros,self.gain)
+    def update(self):
+        self.a[0] = np.polynomial.polynomial.polyfromroots(self.poles)[-2::-1]
+        self.b[0] = np.polynomial.polynomial.polyfromroots(self.zeros)
+    def plot(self,res=128):
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as patches
+        from matplotThings import DraggablePoint
+        from matplotlib.widgets import CheckButtons
+        
+        fig = plt.figure()
+        #ax = fig.add_subplot(111)
+
+        #buttons_place = fig.add_subplot(2,2,1)
+        zplane = fig.add_subplot(1,2,1,projection='polar')
+        #logresp = fig.add_subplot(2,2,2)
+        linresp = fig.add_subplot(1,2,2)
+        linresp.set(xlim=(-.5,.5),ylim=(-2.5,2.5))
+        zplane.set_ylim(0,2)
+        def c(p):
+            a = arg(p)
+            if a > math.pi/2:
+                return math.pi-a,-abs(p)
+            if a <= -math.pi/2:
+                return -math.pi-a,-abs(p)
+            return a,abs(p)
+        def ci(t,r):
+            return np.exp(1j*t)*r
+
+        def color(i):
+            return 1,(math.sin(i*2**.5)+1)/2/4,(math.sin(i)+1)/2/4
+
+        def amap(y):
+            #0 to 1
+            return y/2.5
+        def ainv(y):
+            return y*2.5
+        def bmap(y):
+            #0 to ∞
+            return 1-y/2.5
+        def binv(y):
+            return (1-y)*2.5
+        cmod = lambda x:((x+.5)%1)-.5
+        
+        a = (lambda p:(p[0]*2*math.pi,amap(p[1])),lambda p:(cmod(p[0]/2/math.pi),ainv(p[1])))
+        b = (lambda p:(p[0]*2*math.pi,bmap(p[1])),lambda p:(cmod(p[0]/2/math.pi),binv(p[1])))
+            
+        
+        freqs = np.arange(res)/res-.5
+        dat = np.zeros((len(freqs),5),dtype=float)
+        def updat():
+            r = np.vectorize(lambda x:giir(x,self.poles,self.zeros))(freqs)
+            for i in range(4):
+                dat[:,-(i+1)-1] = r[i]
+            dat[:,-1] = abs(self.gain[0]/self.gain[1])*dat[:,-2]/dat[:,-3]
+                
+        updat()
+        colors = [(0,1,0),'xkcd:sky blue','xkcd:light red',(0,0,0),(.6,.6,.3)][::-1]
+        alphas = [.75,.5,.5,.25,.25][::-1]
+        zp = [zplane.plot(freqs*2*np.pi,dat[:,i],color=colors[i],alpha=alphas[i])[0] for i in range(5)]
+        lp = [linresp.plot(freqs,dat[:,i],color=colors[i],alpha=alphas[i])[0] for i in range(5)]
+        def replot():
+            updat()
+            for i in range(len(zp)):
+                zp[i].set_ydata(dat[:,i])
+                lp[i].set_ydata(dat[:,i])
+            fig.canvas.draw_idle()
+        
+        def add_pt(colr,p=0,s=0.05,f=[lambda x:x]*2):
+            r = []
+            m = [[lambda x: x]*2,f]
+            w = [1,.2]
+            for i in range(2):
+                place = [zplane,linresp][i]
+                cir = patches.Circle(m[i][1](c(p)), s, fc=colr, alpha=0.75)
+                cir.set_width(cir.width*w[i])
+                place.add_patch(cir)
+                dr = DraggablePoint(cir,*m[i])
+                dr.connect()
+                r += [dr]
+            pt = r[0].point
+            pt.set_width(pt.height/(abs(pt.center[1])+.001))
+            return r
+        def gmove(dr):
+            self.gain[dr.dat[1]] = ci(*dr.pos())
+        def pmove(dr):
+            self.poles[dr.dat[1]] = ci(*dr.pos())
+            self.update()
+        def zmove(dr):
+            self.zeros[dr.dat[1]] = ci(*dr.pos())
+            self.update()
+        def move(dr):
+            [gmove,pmove,zmove][dr.dat[0]](dr)
+            p = dr.pos()
+            for d in drs[dr.dat[0]][dr.dat[1]]:
+                d.move(*p)
+            pt = drs[dr.dat[0]][dr.dat[1]][0].point
+            pt.set_width(pt.height/(abs(p[1])+.001))
+            replot()
+        gain_num = add_pt(color(0)[::-1],self.gain[0],.08,b)
+        gain_den = add_pt(color(0),self.gain[1],.08,a)
+        for d in gain_num:
+            d.dat = (0,0)
+            d.hooks[1] = move
+        for d in gain_den:
+            d.dat = (0,1)
+            d.hooks[1] = move
+        poles = [add_pt(color(i+1),self.poles[i],.05,a) for i in range(len(self.poles))]
+        zeros = [add_pt(color(i+1)[::-1],self.zeros[i],.05,b) for i in range(len(self.zeros))]
+        for i in range(len(poles)):
+            for d in poles[i]:
+                d.dat=(1,i)
+                d.hooks[1] = move
+        for i in range(len(zeros)):
+            for d in zeros[i]:
+                d.dat=(2,i)
+                d.hooks[1] = move
+
+        drs = [[gain_num,gain_den],poles,zeros]
+            
+        nogc = (drs,)
+
+        
+        
+        
+        plt.show(block=0)
+        
+        return plt,nogc
+    def unlink(self):
+        self.a = [np.copy(self.a[0])]
+        self.b = [np.copy(self.b[0])]
+        self.gain = [self.gain[0],self.gain[1]]
+    def __call__(self,nump=True):
+        if nump:
+            def iir(v,ind=[0],state=[np.zeros(self.order()+1,dtype=complex)],a=self.a,b=self.b,gain=self.gain,self=self):
+                if len(b[0]) > len(state[0]) or len(a[0]) >= len(state[0]):
+                    ad = len(a[0])+len(b[0])
+                    state[0] = np.concatenate((state[0][:ind[0]+1],np.zeros(ad,dtype=complex),state[0][ind[0]+1:]))
+                    ind[0] += ad
+                
+                s = len(state[0])-ind[0]
+                v -= np.dot(state[0][ind[0]+1:ind[0]+1+len(a[0])],a[0][:s-1])
+                if len(a[0]) >= s:
+                    v -= np.dot(state[0][:len(a[0])+1-s],a[0][s-1:]) 
+                
+                state[0][ind[0]] = v
+                i = ind[0]
+                ind[0] = (ind[0]-1)%len(state[0])
+                g = gain[0]/gain[1]
+                if len(b[0]) > s:
+                    return g*(np.dot(state[0][i:i+len(b[0])],b[0][:s])+np.dot(state[0][:len(b[0])-s],b[0][s:]))
+                return g*np.dot(state[0][i:i+len(b[0])],b[0][:s])
+        else:
+            def iir(v,ind=[0],state=[0]*(self.order()+1),a=self.a,b=self.b,gain=self.gain,self=self):
+                sl = len(state)
+                while len(b[0]) > sl or len(a[0]) >= sl:
+                    ad = len(a[0])+len(b[0])
+                    state += state
+                    sl *= 2
+
+                for i in range(len(a[0])):
+                    v -= state[(i+1+ind[0])%sl]*a[0][i]
+                
+                state[ind[0]] = v
+
+                r = 0
+                for i in range(len(b[0])):
+                    r += state[(i+ind[0])%sl]*b[0][i]
+                ind[0] = (ind[0]-1)%sl
+                return r*gain[0]/gain[1]
+        return iir
+    
 def allpassl(r,f):
     c = -2*r*math.cos(2*math.pi*f)
     return iir2l(c,r*r,r*r,c,1)
@@ -1452,3 +1644,299 @@ def integ(g,a=1):
         v *= a
         v += i
         yield v
+
+
+
+
+class SamplingFilter:
+    def __init__(self):
+        self.v = 0
+        self.t = 0
+        self.ti = 0
+        self.sig = []
+    def copy(self,dest=None):
+        if dest == None:
+            dest = SamplingFilter()
+        dest.v = self.v
+        dest.t = self.t
+        dest.ti = self.ti
+        dest.sig = self.sig
+        return dest
+    def send(self,v):
+        self.v = v
+    def read(self):
+        return self.v
+    def update(self,dt):
+        pass
+    def step(self,dt):
+        while dt > 0:
+            if self.ti >= len(self.sig):
+                self.sig = []
+                self.ti = 0
+                self.t = 0
+                self.update(dt)
+                return
+            else:
+                d = self.sig[self.ti][1]-self.t
+                if d < 0:
+                    self.send(self.sig[self.ti][0])
+                    self.ti += 1
+                    #print(self.sig,self.t,d)
+                    #assert 0#next signal point was in the past
+                elif d <= dt:
+                    
+                    self.update(d)
+                    self.send(self.sig[self.ti][0])
+                    self.ti += 1
+                    self.t += d
+                    dt -= d
+                else:
+                    self.update(dt)
+                    self.t += dt
+                    return
+    
+    def rebase_signal(self):
+        self.sig = [(v[0],v[1]-self.t) for v in self.sig[self.ti:] if v[1] >= self.t]
+        self.ti = 0
+    def merge_signal(self,series,dt=None):
+        if dt != None:
+            r = [(series[i],dt*i) for i in range(len(series))]
+        else:
+            r = series
+        self.rebase_signal()
+        s = self.sig
+        self.sig = []
+        si = 0
+        for i in range(len(r)):
+            while si < len(s) and s[si][1] <= r[i][1]:
+                self.sig += [s[si]]
+                si += 1
+            assert r[i][1] >= 0
+            self.sig += [r[i]]
+        self.sig += s[si:]
+        
+    def add_signal(self,series,dt=None):
+        if dt != None:
+            r = [(series[i],dt*i) for i in range(len(series))]
+        else:
+            r = series
+        self.rebase_signal()
+        s = self.sig
+        self.sig = []
+        si = 0
+        v = self.v
+        rv = 0
+        for i in range(len(r)):
+            while si < len(s) and s[si][1] < r[i][1]:
+                self.sig += [(s[si][0]+rv,s[si][1])]
+                si += 1
+                v = self.sig[-1][0]
+            assert r[i][1] >= 0
+            self.sig += [(r[i][0]+v,r[i][1])]
+            rv = r[i][0]
+        self.sig += [(e[0]+rv,e[1]) for e in s[si:]]
+
+class s_exp(SamplingFilter):
+    def __init__(self,l=-1,a=0):
+        self.l = l
+        self.a = a
+        super().__init__()
+    def copy(self,dest=None):
+        dest = s_exp(self.l,self.a) if dest == None else dest
+        return super().copy(dest)
+    def read(self):
+        return self.a
+    def update(self,dt):
+        m = 1-2**(dt*self.l)
+        self.a += m*(self.v-self.a)
+
+class s_ddo(SamplingFilter):
+    def __init__(self,l=-1,a=0,b=0):
+        self.l = l
+        self.a = a
+        self.b = b
+        super().__init__()
+    def copy(self,dest=None):
+        dest = s_ddo(self.l,self.a,self.b) if dest == None else dest
+        return super().copy(dest)
+    def read(self):
+        return self.a.real+1j*self.b.real
+    def update(self,dt):
+        m = 1-2**(dt*self.l)
+        self.a += m*(self.v.real-self.a)
+        self.b += m*(self.v.imag-self.b)
+
+import scipy
+class s_gaus(SamplingFilter):
+    def __init__(self,stdev=1,l=3,past=None):
+        self.s = stdev
+        self.l = l
+        self.past = [] if past == None else past
+        super().__init__()
+    def copy(self,dest=None):
+        dest = s_gaus(self.s,self.l,self.past) if dest == None else dest
+        return super().copy(dest)
+    def read(self):
+        s = 0
+        t = self.l
+        for p in self.past:
+            s += (scipy.special.erf(t)-scipy.special.erf(t-p[1]))*p[0]
+            t -= p[1]
+        return s/2
+    def update(self,dt):
+        t = dt
+        c = len(self.past)
+        for i in range(len(self.past)):
+            if t >= self.l*2:
+                c = i
+                break
+            t += self.past[i][1]
+        if len(self.past) and self.past[0][0] == self.v:
+            self.past = [(self.v,dt/self.s+self.past[0][1])]+self.past[1:c]
+        else:
+            self.past = [(self.v,dt/self.s)]+self.past[:c]
+
+
+def nsi_rem(x):
+    if x == 0:
+        return 0
+    return scipy.special.sici(x*np.pi)[0]/np.pi - (x>0) + .5
+def gauss_sinc_integral(x,freq=1,stdev=1):
+    xd = x/stdev
+    return nsi_rem(x*freq)*math.exp(-xd*xd) + (x>0) - .5
+def gsi_curry(freq=1,stdev=1):
+    def gsi(x,f=freq,s=stdev):
+        return gauss_sinc_integral(x,f,s)
+    return gsi
+class s_fir(SamplingFilter):
+    def __init__(self,ikern=gsi_curry(1,2),scale=1,l=3,past=None):
+        self.kern_integral = ikern
+        self.s = scale
+        self.l = l
+        self.past = [] if past == None else past
+        super().__init__()
+    def copy(self,dest=None):
+        dest = s_fir(self.kern_integral,self.s,self.l,self.past) if dest == None else dest
+        return super().copy(dest)
+    def read(self):
+        s = 0
+        t = self.l
+        for p in self.past:
+            s += (self.kern_integral(t)-self.kern_integral(t-p[1]))*p[0]
+            t -= p[1]
+        return s
+    def update(self,dt):
+        t = dt
+        c = len(self.past)
+        for i in range(len(self.past)):
+            if t >= self.l*2:
+                c = i
+                break
+            t += self.past[i][1]
+        if len(self.past) and self.past[0][0] == self.v:
+            self.past = [(self.v,dt/self.s+self.past[0][1])]+self.past[1:c]
+        else:
+            self.past = [(self.v,dt/self.s)]+self.past[:c]
+
+
+
+#geometric iir response
+def giir(f,poles,zeros):
+    z = eone**(1j*f)
+    md = 1
+    ma = 1
+    ph = 0
+    gd = 0 # = - dp/df
+    for p in poles:
+        in_c = abs(p) <= 1
+        md *= abs(z-p)
+        a = arg(z-p)
+        ph -= [a,a+round(f.real-a/2/math.pi)*2*math.pi][in_c]
+        if abs(z-p) > 0:
+            gd -= 1/abs(z-p)
+    for ze in zeros:
+        in_c = abs(ze) <= 1
+        ma *= abs(z-ze)
+        a = arg(z-ze)
+        ph += [a,a+round(f.real-a/2/math.pi)*2*math.pi][in_c]
+        if abs(z-ze) > 0:
+            gd += 1/abs(z-ze)
+    return ma,md,ph,gd
+
+
+
+
+            
+
+
+def noise():
+    from random import random
+    while 1:
+        yield 2*random()+2j*random()-1-1j
+noi = noise()
+            
+class vband:
+    def __init__(self,width_num=1,width_denom=1,center=0,band_frac=1,klen=16,wind = lambda x: (np.cos(x*np.pi)+1)/2):
+        #todo: implement rational ratios with kern[phase::numerator]
+        assert width_denom >= 1
+        assert width_num >= 1
+        #self.kw = klen
+        klen *= width_denom #make it an even divison
+        self.out = np.zeros(klen,dtype=complex)
+        w = 2*np.arange(klen*width_num)/klen/width_num-1
+        r = np.arange(klen*width_num)-(klen*width_num)/2
+        self.kern = np.sinc(r/width_denom*band_frac)*band_frac*np.exp(1j*r*np.pi*center/width_num)*wind(w)
+        self.mfac = np.exp(1j*center*np.pi*width_denom/width_num)
+        self.sr = width_denom
+        self.sn = width_num
+        #self.i = 0
+        self.phase = 0
+        self.modu = 1
+    def __call__(self,v):
+        l = len(self.out)
+        #i = self.i
+        #self.i = (i+1)%self.kw
+        #p = ((i-1)%self.kw)*self.sr
+        #i *= self.sr
+        #self.out[p:p+self.sr] = 0
+        #self.out[i:] += v*self.modu*self.kern[:l-i]
+        #self.out[:i] += v*self.modu*self.kern[l-i:]
+        t = self.phase//self.sn
+        if t:
+            self.out[:l-t] = self.out[t:]
+            self.out[l-t:] = 0
+            self.phase %= self.sn
+        self.out += (v*self.modu)*self.kern[self.sn-self.phase-1::self.sn]
+
+        self.modu *= self.mfac
+        #return self.out[i:i+self.sr]
+        self.phase += self.sr
+        return self.out[:self.phase//self.sn]
+    
+        
+def fsweep(lo=-.5,hi=.5,rate=0.1/48000,start=0):
+    x = 0
+    f = start
+    while 1:
+        while f < hi:
+            f += rate
+            x = (x+f)%1
+            yield np.exp(1j*np.pi*2*x)
+        while f > lo:
+            f -= rate
+            x = (x+f)%1
+            yield np.exp(1j*np.pi*2*x)
+            
+
+def downsamp(bs=64,wind = lambda x: (np.cos(x*np.pi)+1)/2):
+    w = 2*np.arange(bs)/(bs-1)-1
+    r = np.arange(bs)-(bs//2)
+    kern = np.sinc(r/2)*wind(w)
+    def do(v,b=np.zeros(bs,dtype=complex),k=kern,i=[0]):
+        b[i[0]] = v
+        if i[0]%2 == 0:
+            r = np.dot(b[i[0]:],k[:len(k)-i[0]])+np.dot(b[:i[0]],k[len(k)-i[0]:])
+            i[0] = (i[0]+1)%len(b)
+            return r
+        i[0] = (i[0]+1)%len(b)
+    return do

@@ -128,6 +128,19 @@ def integ(g,a=1):
         v += i
         yield v
 
-from audioOut import float_out,alaw_out
+from audioOut import float_out,alaw_out,mono
 from pitch import *
-from matplotThings import live_graph
+from matplotThings import live_graph,graph
+import matplotThings as mpt
+from voice import *
+import components as q
+
+from hadamard import *
+
+
+def sampgen(samp,g,t=6000):
+    i = 0
+    for f in g:
+        for _ in range(t):
+            yield samp[int(i)]
+            i = (i+f)%len(samp)

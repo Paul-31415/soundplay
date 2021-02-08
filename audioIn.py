@@ -98,7 +98,9 @@ class _waveFile:
                 while len(r):
                     yield [(int.from_bytes(r[w*i:w*(i+1)],"little",signed=w>1)/d - (w==0)) for i in range(n)]
                     r = wav.readframes(1)
-
+    def start(self,s=0):
+        with wave.open(open(self.path,"rb"),"rb") as wav:
+            return self.__iter__(int(wav.getnframes()*s))
     def load(self):
         with wave.open(open(self.path,"rb"),"rb") as wav:
             self.rate = wav.getframerate()
@@ -175,11 +177,21 @@ class audioFile:
         if self.rate == None:
             self.rate = self.file.rate
         self.loaded = True
-    def play(self,d=0):
+    def play(self,d=0,r=1):
         if not self.loaded:
             self.load()
-        for i in self.file.start(d):
-            yield i
+        t = 0
+        g = self.file.start(d)
+        try:
+            i = next(g)
+            while 1:
+                t += r
+                while t >= 1:
+                    t -= 1
+                    i = next(g)
+                yield i
+        except StopIteration:
+            pass
     def __iter__(self):
         if not self.loaded:
             self.load()

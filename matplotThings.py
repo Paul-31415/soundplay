@@ -6,6 +6,14 @@ class nogc:
     def __repr__(self):
         return "nogc(...)"
 
+def graph(func,xm=-10,xM=10,res=1000):
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(nrows=1, ncols=1)
+    t = lambda x: x/(res-1)*(xM-xm)+xm
+    ax.plot([t(i) for i in range(res)],[func(t(i)) for i in range(res)])
+    plt.show(block=0)
+
+    
 def live_graph(dfuncs=()):
     import matplotlib.pyplot as plt
     from matplotlib.animation import FuncAnimation
@@ -15,7 +23,7 @@ def live_graph(dfuncs=()):
         for i in range(len(p)):
             p[i].set_ydata(df[i](frame))
         return p
-    ani = FuncAnimation(fig, update,blit=True)
+    ani = FuncAnimation(fig, update)
     plt.show(block=0)
     return plt,nogc(ani,update,p,fig,ax)
 
@@ -68,6 +76,7 @@ def batchUpsamp(frame_size=1<<10,to_size=1<<16):
         return o[0][((i[0]*2+1)*frame_size//4)*to_size//frame_size:((i[0]*2+3)*frame_size//4)*to_size//frame_size]
     return do
 import numpy as np
+
 def vscope(gen,spf = 1<<10,res=1<<10,d=.6,g=100,ups = 1<<16,colr = np.array([.01,.1,.01],dtype=np.float32)):
     import scipy
     import matplotlib.pyplot as plt
@@ -83,13 +92,13 @@ def vscope(gen,spf = 1<<10,res=1<<10,d=.6,g=100,ups = 1<<16,colr = np.array([.01
     ef = math.log(d)
     buf = np.fromiter(gen,complex,spf)
     oldBuf = np.array([0j]*spf)
+    fr = np.arange(ups).astype(np.float32)
+    gs = np.exp(fr*(-ef/ups))*(g*spf/ups)
     while 1:
         for v in buf:
             yield v
         r = scipy.signal.resample(np.concatenate((oldBuf,buf)),ups*2)[ups//2:3*ups//2]
         x,y = np.clip(((r.real+1)*res/2).astype(int),0,res-1),np.clip(((1-r.imag)*res/2).astype(int),0,res-1)
-        fr = np.arange(ups).astype(np.float32)
-        gs = np.exp(fr*(-ef/ups))*(g*spf/ups)
         fbuf[y,x] += np.outer(gs,colr)
         im.set_data(np.clip(fbuf,0,1))
         fig.canvas.draw_idle()
@@ -98,6 +107,38 @@ def vscope(gen,spf = 1<<10,res=1<<10,d=.6,g=100,ups = 1<<16,colr = np.array([.01
         oldBuf = buf
         buf = np.fromiter(gen,complex,spf)
 
+def vscope_p(gen,spf = 1<<10,res=1<<10,d=.6,g=100,ups = 1<<16,colr = np.array([.01,.1,.01],dtype=np.float32)):
+    import scipy
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(nrows=1, ncols=1)
+    #ax.set_facecolor("k")
+    fig.patch.set_facecolor("xkcd:grey")
+    #ax.set_ylim((-2,2))
+    #ax.set_xlim((-2,2))
+    fbuf = np.array([[[0,0,0]]*res]*res,dtype=np.float32)
+    im = ax.imshow(fbuf)
+    plt.show(block=False)
+    import math
+    ef = math.log(d)
+    buf = np.fromiter(gen,complex,spf)
+    oldBuf = np.array([0j]*spf)
+    t = (np.arange(ups)*(res/ups)).astype(int)
+    gs = np.ones(ups)*(g*spf/ups)
+    while 1:
+        for v in buf:
+            yield v
+        r = scipy.signal.resample(np.concatenate((oldBuf,buf)),ups*2)[ups//2:3*ups//2]
+        x,y = np.clip(((r.real+1)*res/4).astype(int),0,res//2-1),np.clip(((1-r.imag)*res/4).astype(int),0,res//2-1)
+        fbuf[y+(res//2),t] += np.outer(gs,colr)
+        fbuf[x,t] += np.outer(gs,colr)
+        im.set_data(np.clip(fbuf,0,1))
+        fig.canvas.draw_idle()
+        fbuf *= d
+
+        oldBuf = buf
+        buf = np.fromiter(gen,complex,spf)
+
+        
 def ioscope(gen,spf=1<<11,res=1<<10,d=.6,g=100,resampler = upsamp()):
     import scipy
     import matplotlib.pyplot as plt
@@ -135,20 +176,28 @@ def ioscope(gen,spf=1<<11,res=1<<10,d=.6,g=100,resampler = upsamp()):
         fbuf *= d
 
 
+def design():
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    from matplotThings import DraggablePoint
+    from matplotlib.widgets import CheckButtons,Textbox
+        
+
 #https://stackoverflow.com/questions/21654008/matplotlib-drag-overlapping-points-interactively
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
 class DraggablePoint:
     lock = None #only one can be animated at a time
-    def __init__(self, point,animate=False,hooks = [None,None,None]):
+    def __init__(self, point,posfunc=lambda x:x,posinv=lambda x: x,animate=False,hooks = [None,None,None]):
         self.point = point
         self.hooks = hooks
         self.press = None
         self.animate=False
         self.background = None
         self.dat = None
-
+        self.map = posfunc
+        self.imap = posinv
     def connect(self):
         'connect to all the events we need'
         self.cidpress = self.point.figure.canvas.mpl_connect('button_press_event', self.on_press)
@@ -181,9 +230,9 @@ class DraggablePoint:
             canvas.blit(axes.bbox)
 
     def move(self,x,y):
-        self.point.center = (x,y)
+        self.point.center = self.imap((x,y))
     def pos(self):
-        return self.point.center
+        return self.map(self.point.center)
 
     def on_motion(self, event):
         if DraggablePoint.lock is not self:
@@ -253,3 +302,8 @@ for circ in circles:
 
 plt.show()
 """
+
+
+
+
+    

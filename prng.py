@@ -11,6 +11,14 @@ def rand16():
         v[1] = (rrca8((v[0]^0xff)-1)+v[1])&0xff
         v[0] = ((v[1]-v[0])^162)&0xff
         yield v[1]
+
+def vrand16():
+    v = [0,0]
+    while 1:
+        v[1] = (rrca8((v[0]^0xff)-1)+v[1])&0xff
+        v[0] = ((v[1]-v[0])^162)&0xff
+        yield v[0]-v[1]
+        
 def rand24():
     v = [0,0,0]
     while 1:

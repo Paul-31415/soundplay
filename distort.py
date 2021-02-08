@@ -1356,7 +1356,43 @@ def tritapsrcl(bs=4800):
         f = 2*abs((c[1]-c[0])%len(b)-(len(b)/2))/len(b)
         return b[int(c[1])]*(1-f)+b[int(c[1]+len(b)/2)]*f
     return do
-                    
+
+def fmask(m=np.ones(4096)):
+    def msk(x,m=m):
+        a = abs(x)
+        l = len(a)//2
+        a[1:l] += a[-1:-l:-1]
+        return a[:l]*m
+    return msk
+
+def fourier_max_pitch_estimator(bs=8192,mask =None,window = lambda x: np.cos(x*math.pi*2)*.5+.5):
+    if mask is None:
+        mask = fmask((lambda x: (x*((.5-x)**1)**(1/10)))(np.arange(bs//2)/bs))
+    def do(v,b=np.zeros(bs,dtype=complex),a=[0,.0001],w = window(np.arange(bs)/(bs-1)-.5)):
+        b[a[0]] = v
+        a[0] = (a[0]+1)%len(b)
+        if a[0] == 0:
+            a[1] = np.argmax(mask(scipy.fft.fft(b*w)))/len(b)
+        return a[1]
+    return do
+
+fmpe = fourier_max_pitch_estimator
+
+def fourier_max_pitch_estimator_crossfade(bs=8192,th=.5,mask =None,window = lambda x: np.cos(x*math.pi*2)*.5+.5):
+    if mask is None:
+        mask = fmask((lambda x: (x*((.5-x)**1)**(1/10)))(np.arange(bs//2)/bs))
+    def do(v,b=np.zeros(bs,dtype=complex),a=[0,.0001,.0001],w = window(np.arange(bs)/(bs-1)-.5)):
+        b[a[0]+(len(b)//2)] = v
+        a[0] = (a[0]+1)%(len(b)//2)
+        if a[0] == 0:
+            v = mask(scipy.fft.fft(b*w))
+            i = np.argmax(v)
+            a[2],a[1] = i/len(b) if v[i]>th else a[2],a[2]
+            b[:(len(b)//2)] = b[(len(b)//2):]
+        return a[2]*(2*a[0]/len(b))+a[1]*(1-2*a[0]/len(b))
+    return do
+
+fmpec = fourier_max_pitch_estimator_crossfade
 
 
 def followl(vf=lambda o,d: o*.995+d*(abs(d)-.1)*.01):
@@ -1482,7 +1518,14 @@ def merge_sort(g1,g2,f=ms_slowest(),emit_all=True):
             yield v
             
             
+def merge_sort_deriv_l(*g):
+    lens = [0]*len(g)
+    vals = [0]*len(g)
+    out = 0
+    
 
+
+            
 
 def exp_dpcm_encode(a=0.01,h=1,l=-1):
     def enc(v,p=[0],a=a,d=h-l,l=l):
@@ -1497,3 +1540,40 @@ def exp_dpcm_decode(a=0.01,h=1,l=-1):
     return dec
         
     
+
+
+
+def twang(blen=128,bfill=lambda i: ((i**.5)%.1)*20-1+((i**.33)%.1)*20j-1j,filt=lambda x:x*.9,offset=0):
+    buf = [bfill(i) for i in range(blen)]
+    i = 0
+    while 1:
+        yield buf[i]
+        buf[(i-offset)%blen] = filt(buf[i])
+        i = (i+1)%blen
+
+
+
+
+cround = o(round)
+def fpiir1l(a1=0,b0=64,b1=0,point=6,mask=0xff,acc=0):
+    def do(v,a=[a1],b=[b0,b1],s=[acc]):
+        p = s[0]
+        s[0] = ((round(v*(1<<point))&mask)-((a[0]*p)>>point))
+        return (((b[0]*s[0])>>point)+((b[1]*p)>>point))&mask
+    return do
+
+
+def btwangf(s=128):
+    def adj(a,b):
+        if a > b:
+            return a-1
+        elif a < b:
+            return a+1
+        return a
+    def ca(a,b):
+        return adj(a.real,b.real)+1j*adj(a.imag,b.imag)
+    def do(v,p=[0],s=s):
+        pr = p[0]
+        p[0] = cround(v*s)
+        return ca(p[0],pr)/s
+    return do
