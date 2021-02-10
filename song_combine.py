@@ -18,6 +18,7 @@ args = parser.parse_args()
 import pitch
 import audioIn as aud
 import audioOut
+import numpy as np
 
 src = aud.audioFile(args.source)
 to = aud.audioFile(args.target)
