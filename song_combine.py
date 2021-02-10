@@ -43,7 +43,7 @@ if args.size != -1:
         sr = ((args.size//2)*48000)//len(r)
         r = scipy.signal.resample(r,args.size//2)
         print("resampling down to",sr)
-    audioOut.aiff_out(r*16,args.o,rate=sr)
+    audioOut.alaw_out(r*16,args.o,rate=sr)
 else:
     audioOut.float_out(gen,args.o,show=1)
 print("done!                 ")
