@@ -11,6 +11,7 @@ parser.add_argument('--st',default=1<<12,type=int,help="fourier window size of t
 parser.add_argument('--s2',default=1<<12,type=int,help="fourier window size of output (should be power of 2)")
 parser.add_argument('-a',default=1,type=float,help="alpha, how much to apply the transformation")
 parser.add_argument('--size',default=-1,type=int,help="compressed mode size cap")
+parser.add_argument('-m',default=False,action="store_true",help="match song's durations")
 
 
 args = parser.parse_args()
@@ -30,6 +31,12 @@ g = src.play(0)
 print("loading target file",end="\r")
 to[0]
 gt = to.play(0)
+if args.m:
+    print("resampling...       ",end="\r")
+    if len(src) > len(to):
+        gt = (i for i in scipy.signal.resample(np.fromiter(to,dtype=complex),len(src)))
+    else:
+        g = (i for i in scipy.signal.resample(np.fromiter(src,dtype=complex),len(to)))
 
 print ("progress (in samples):")
 
