@@ -10,6 +10,7 @@
 
 import math
 import numpy as np
+import scipy.signal
 import scipy as sp
 
 def vprod(v,o):
@@ -181,7 +182,6 @@ class window_resampler:
         self.i = (self.i+1)%len(self.buf)
         self.oi += 1
         return None
-
 class window_func:
     def __init__(self,thing,size=256,window=lambda x:math.cos(x*math.pi)/2+1,mult=2):
         self.times=mult
@@ -209,6 +209,7 @@ class window_func:
             r = self(v)
             if r is not None:
                 yield r
+    
 class fourier_max_note_estimator:
     def __init__(self,size=1<<12,*args):
         self.w = window_func(self.cb,size,*args)
@@ -325,7 +326,10 @@ class fpa:
         return np.concatenate((np.array([0]),sp.signal.find_peaks(a)[0],np.array([len(d)])))
 class ft_re:
     def __init__(self,size=1<<12,sf=1,mf = lambda a,sf:a*sf,sp=1):
-        self.pks = fpa(size,lambda x:math.cos(x*sp*math.pi)/2+1 if abs(x*sp) < 1 else 0)
+        if type(sp) is not int and type(sp) is not float:
+            self.pks = sp
+        else:
+            self.pks = fpa(size,lambda x:math.cos(x*sp*math.pi)/2+1 if abs(x*sp) < 1 else 0)
         self.sf = sf
         self.mf = mf
     def __call__(self,d):
@@ -337,12 +341,49 @@ class ft_re:
         return sp.fft.ifft(r)
     def gp(self,d):
         return self.pks(d)
-def mt_s(to,s1=1<<12,s2=1<<12,sp1=1,sp2=1):
+        
+    
+def quantile_lookups(f,p,q):
+    if len(p) == 0:
+        return p
+    vals = f[p]
+    return p[vals>np.quantile(vals,q)]
+def mt_s(to,s1=1<<12,s2=1<<12,sp1=1,sp2=1,alpha=1):
     f = ft_re(s1,sp=sp2)
     ng = window_func(lambda x: f.gp(x),s1).gen(to)
-    return window_resampler(ft_re(s1,s2/s1,lambda a,sf:round_aa(a,next(ng)),sp1),s1,s2)
-def temposcale(s1=1<<12,s2=1<<12,spec=1):
+    return window_resampler(ft_re(s1,s2/s1,lambda a,sf:a*(1-alpha)+alpha*round_aa(a,next(ng)),sp1),s1,s2)
+def mt_pq(to,q1=.98,q2=.98,alpha=1,s1=1<<12,s2=1<<12,st=1<<12):
+    return window_resampler(mt_pq_(to,q1,q2,alpha,s1,s2,st),s1,s2)
+class mt_pq_:
+    def __init__(self,to,q1=1,q2=1,alpha=1,s1=1<<12,s2=1<<12,st=1<<12):
+        self.to = window_func(lambda x:x,st).gen(to)
+        self.s1 = s1
+        self.s2 = s2
+        self.st = st
+        self.q1 = q1
+        self.q2 = q2
+        self.alpha = alpha
+    def __call__(self,d):
+        f = sp.fft.fft(d)
+        a = abs(f)
+        l = int(len(d)*self.s2/self.s1)
+        r = np.zeros(l,dtype=complex)
+        td = next(self.to)
+        ft = sp.fft.fft(td)
+        at = abs(ft)
+        pt = sp.signal.find_peaks(at)[0]
+        pt = np.concatenate((np.array([0]),quantile_lookups(at,pt,self.q2),(np.array([self.st-1]))))*(l-1)/(self.st-1)
+        p = sp.signal.find_peaks(a)[0]
+        p = np.concatenate((np.array([0]),quantile_lookups(a,p,self.q1),(np.array([l-1]))))
+        rp = round_aa(p,pt)*self.alpha+p*(1-self.alpha)
+        regions_stitch(f,r,p,rp)
+        return sp.fft.ifft(r)
+
+def temposcale(s1=1<<12,s2=1<<12,spec=0):
     return window_resampler(ft_re(s1,s2/s1,sp=spec),s1,s2)
+def pitchscale(p=1,s=1<<12,spec=0):
+    p = genify(p)
+    return window_resampler(ft_re(s,1,mf=lambda a,sp:next(p)*ftft(a,s),sp=spec),s,s)
 class ft_repp:
     def __init__(self,sf=2,ffunc = lambda f,sf,l,ff: f*sf):
         self.sf = sf
@@ -374,8 +415,9 @@ def round_aa(v,r):
     return r[np.searchsorted(r[1:]+r[:-1],v*2)]
 
 
-def music_transfer(to,s1=1<<12,s2=1<<12,*a):
-    ng = ft_space_func(ft_rep_p(*a),s1).gen(to)
+def music_transfer(to,s1=1<<12,s2=1<<12,n=0,*a):
+    f = ft_rep_p(*a)
+    ng = ft_space_func(lambda x: f(afn(x,n)),s1).gen(to)
     return ft_rspace(ft_rep(s2/s1,lambda f,s,l,t: round_aa(f,next(ng))),s1,s2)
 
 

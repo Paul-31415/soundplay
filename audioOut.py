@@ -57,7 +57,7 @@ def float_out(g,name="out.wav",rate=48000,show=0,phony=(2,lambda v:(v.real,v.ima
     wav_out(g,name,rate,show,phony+('<'+str(phony[0])+'f',),fmt=(3,32),dsize=4,order='f')
 def alaw_out(g,name="out.wav",scale=1,rate=48000,show=0,phony=(2,lambda v:(v.real,v.imag))):
     if type(g) == np.ndarray:
-        g = np.array([0x55 ^ valaw_c(e) for e in phony[1](g)],dtype='B')
+        g = np.array([0x55 ^ valaw_c(e*scale) for e in phony[1](g)],dtype='B')
     else:
         phony = (phony[0],lambda v,p=phony[1],s=scale: [0x55^alaw_c(e*s) for e in p(v)])
     wav_out(g,name,rate,show,phony+('<'+str(phony[0])+'B',),fmt=(6,8),dsize=1,order='f')
@@ -88,7 +88,7 @@ def wav_out(g,name="out.wav",rate=48000,show=0,phony=(2,lambda v:(v.real,v.imag)
         if type(g) == np.ndarray:
             b = g.tobytes(order)
             f.write(b)
-            return fin(len(g))
+            return fin(max(g.shape))
         for v in g:
             f.write(struct.pack(phony[2],*phony[1](v)))
             if show and (s%rate == 0):
