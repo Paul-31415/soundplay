@@ -19,6 +19,7 @@ import pitch
 import audioIn as aud
 import audioOut
 import numpy as np
+import scipy.signal
 
 src = aud.audioFile(args.source)
 to = aud.audioFile(args.target)
