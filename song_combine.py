@@ -34,7 +34,13 @@ gt = to.play(0)
 print ("progress (in samples):")
 
 t = pitch.mt_pq(gt,args.q1,args.q2,args.a,args.s1,args.s2,args.st)
-gen = pitch.flat((t(v) for v in g))
+def trygen(g):
+    try:
+        for v in g:
+            yield v
+    except:
+        pass
+gen = trygen(pitch.flat((t(v) for v in g)))
 if args.size != -1:
     print("(working...)",end="\r")
     r = np.fromiter(gen,dtype=complex)
