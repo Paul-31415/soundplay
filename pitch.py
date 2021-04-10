@@ -182,6 +182,12 @@ class window_resampler:
         self.i = (self.i+1)%len(self.buf)
         self.oi += 1
         return None
+    def gen(self,g):
+        for v in g:
+            yield self(v)
+    def fgen(self,g):
+        for v in flat(self.gen(g)):
+            yield v
 class window_func:
     def __init__(self,thing,size=256,window=lambda x:math.cos(x*math.pi)/2+1,mult=2):
         self.times=mult
@@ -341,21 +347,59 @@ class ft_re:
         return sp.fft.ifft(r)
     def gp(self,d):
         return self.pks(d)
-        
+
+
+def tf_bufs(src,dst):
+    f = sp.fft.fft(src)
+    df = sp.fft.fft(dst)
+    r = np.zeros(len(dst),dtype=complex)
+    a = sp.signal.find_peaks(np.abs(f))[0]
+    da = sp.signal.find_peaks(np.abs(df))[0]
+    regions_stitch(f,r,a,round_aa(a,da))
+    return sp.fft.ifft(r)
+def tf_bufs_qs(src,dst,qa=0,qb=0):
+    f = sp.fft.fft(src)
+    df = sp.fft.fft(dst)
+    r = np.zeros(len(dst),dtype=complex)
+    a = quantile_lookups(np.abs(f),sp.signal.find_peaks(np.abs(f))[0],qa)
+    da = quantile_lookups(np.abs(df),sp.signal.find_peaks(np.abs(df))[0],qb)
+    regions_stitch(f,r,a,round_aa(a,da))
+    return sp.fft.ifft(r)
+
+    
     
 def quantile_lookups(f,p,q):
     if len(p) == 0:
         return p
     vals = f[p]
     return p[vals>np.quantile(vals,q)]
+def numile_lookups(f,p,q):
+    if len(p) <= q:
+        return p
+    vals = f[p]
+    return p[vals>np.quantile(vals,1-q/len(p))]
+
 def mt_s(to,s1=1<<12,s2=1<<12,sp1=1,sp2=1,alpha=1):
     f = ft_re(s1,sp=sp2)
     ng = window_func(lambda x: f.gp(x),s1).gen(to)
     return window_resampler(ft_re(s1,s2/s1,lambda a,sf:a*(1-alpha)+alpha*round_aa(a,next(ng)),sp1),s1,s2)
-def mt_pq(to,q1=.98,q2=.98,alpha=1,s1=1<<12,s2=1<<12,st=1<<12):
-    return window_resampler(mt_pq_(to,q1,q2,alpha,s1,s2,st),s1,s2)
+def round_aa(v,r,*a):
+    return r[np.searchsorted(r[1:]+r[:-1],v*2)]
+def rm__map_sorted(p,pt,a,at):
+    sind = np.argsort(a[p[1:-2].astype(int)])+1 #a[p][sind] is sorted
+    sindt = np.argsort(at[pt[1:-2].astype(int)])+1 #at[pt][sindt] is sorted
+    res = p.copy()
+    if len(sindt) < len(sind):
+        res[sind] = pt[np.resize(sindt,len(sind))]
+    else:
+        res[sind] = pt[sindt[:len(sind)]]
+    return res
+
+
+def mt_pq(to,q1=.98,q2=.98,alpha=1,s1=1<<12,s2=1<<12,st=1<<12,rounding_mode=round_aa,q_mode=quantile_lookups):
+    return window_resampler(mt_pq_(to,q1,q2,alpha,s1,s2,st,rounding_mode,q_mode),s1,s2)
 class mt_pq_:
-    def __init__(self,to,q1=1,q2=1,alpha=1,s1=1<<12,s2=1<<12,st=1<<12):
+    def __init__(self,to,q1=1,q2=1,alpha=1,s1=1<<12,s2=1<<12,st=1<<12,rounding_mode=round_aa,q_mode=quantile_lookups):
         self.to = window_func(lambda x:x,st).gen(to)
         self.s1 = s1
         self.s2 = s2
@@ -363,6 +407,8 @@ class mt_pq_:
         self.q1 = q1
         self.q2 = q2
         self.alpha = alpha
+        self.rounding_mode = rounding_mode
+        self.quant = q_mode
     def __call__(self,d):
         f = sp.fft.fft(d)
         a = abs(f)
@@ -372,12 +418,29 @@ class mt_pq_:
         ft = sp.fft.fft(td)
         at = abs(ft)
         pt = sp.signal.find_peaks(at)[0]
-        pt = np.concatenate((np.array([0]),quantile_lookups(at,pt,self.q2),(np.array([self.st-1]))))*(l-1)/(self.st-1)
         p = sp.signal.find_peaks(a)[0]
-        p = np.concatenate((np.array([0]),quantile_lookups(a,p,self.q1),(np.array([l-1]))))
-        rp = round_aa(p,pt)*self.alpha+p*(1-self.alpha)
-        regions_stitch(f,r,p,rp)
+        qpt = self.quant(at,pt,self.q2)
+        pt = np.concatenate((np.array([0]),qpt,(np.array([self.st-1]))))*((l-1)/(self.st-1))
+        qp = self.quant(a,p,self.q1)
+        p = np.concatenate((np.array([0]),qp,(np.array([l-1]))))
+        rp = self.rounding_mode(p,pt,a,at)*self.alpha+p*(1-self.alpha)
+        regions_stitch(f,r,p,rp%l)
         return sp.fft.ifft(r)
+
+def nearest_resamp_aa(a,l):
+    return a[(np.arange(l)*((len(a)-1)/(l-1))).astype(int)]
+
+def round_force_resamp(p,pt,*a):
+    return nearest_resamp_aa(pt,len(p))
+
+def remap_peaks_ostat(p,pt,a,at):
+    op = np.argsort(a[p])[::-1]
+    opt = np.argsort(at[pt])[::-1]
+    #remap p[op[i]] to pt[opt[i]]
+    return pt[opt[op%len(opt)]]
+    
+
+    
 
 def temposcale(s1=1<<12,s2=1<<12,spec=0):
     return window_resampler(ft_re(s1,s2/s1,sp=spec),s1,s2)
@@ -411,8 +474,6 @@ class ft_repp:
             ce = int(pk[i]*self.sf)
             r[lo+ce:hi+ce] = f[lo+pk[i]:hi+pk[i]]
         return r
-def round_aa(v,r):
-    return r[np.searchsorted(r[1:]+r[:-1],v*2)]
 
 
 def music_transfer(to,s1=1<<12,s2=1<<12,n=0,*a):
@@ -841,8 +902,9 @@ class fourier_note_components:
     def mx(self,blen):
         m = sp.sparse.csc_matrix(self.matrix(blen))
         return sp.sparse.linalg.inv(m),m
-    
-        
+
+
+
 fnc = fourier_note_components
 def genify(g):
     try:
@@ -860,3 +922,229 @@ def ostat(order=lambda x: abs(x)):
         return b
     return cut
 
+
+
+class buftf:
+    def __init__(self,l=1<<12,runner=lambda a,b:a):
+        self.bl = l
+        self.buf = np.zeros(l,dtype=complex)
+        self.wbuf = np.zeros(l,dtype=complex)
+        self.buf_i = 0
+        self.obuf = np.zeros(l,dtype=complex)
+        self.window = 1-.5*np.cos(np.arange(l)*(2*np.pi/l))
+        self.run = runner
+    def __call__(self,v):
+        l = self.bl
+        hl = l//2
+        self.buf[self.buf_i+hl]=v
+        self.buf_i += 1
+        if self.buf_i >= hl:
+            self.buf_i = 0
+            self.obuf[:hl] = self.obuf[hl:]
+            self.obuf[hl:] = 0
+            self.wbuf[:] = self.buf[:]
+            self.wbuf *= self.window
+            self.run(self.wbuf,self.obuf)
+            self.buf[:hl] = self.buf[hl:]
+            self.buf[hl:] = 0
+            return self.obuf[:hl]
+class bufpk:
+    def __init__(self,l=1<<12,runner=lambda a,b:a):
+        self.bl = l
+        self.obuf = np.zeros(l,dtype=complex)
+        self.window = 1-.5*np.cos(np.arange(l)*(2*np.pi/l))
+        self.run = runner
+    def __call__(self,v):
+        l = self.bl
+        hl = l//2
+        self.obuf[:hl] = self.obuf[hl:]
+        self.obuf[hl:] = 0
+        self.obuf += self.run(v)
+        return self.obuf[:hl]
+        
+
+
+
+def fourier_harm_pick_inds(l,i,h):
+    hl = (l//2)
+    ll = min(h,(l-hl)//i)
+    tl = min(h+1,(hl-1)//i)
+    return (np.arange(ll+1+tl)-ll)*i
+def fhpi_pos(l,i,h):
+    p = fourier_harm_pick_inds(l,i,h)%l
+    return np.sort(p)
+def fourier_freq_vals(l):
+    r = np.arange(l)
+    r[r>=l//2] -= l
+    return r
+    
+def harm_mat(l,harms=1<<16,wf = lambda f,a:np.ones(len(a))/len(a)):
+    m = np.zeros((l,l//2))
+    for i in range(l//2):
+        inds = fourier_harm_pick_inds(l,i+1,harms)
+        m[inds,i] = wf(i+1,inds)
+    return sp.sparse.csc_matrix(m)
+def hmg(gf=-1,bh=.9,norm=True):
+    def do(f,a):
+        r = (a!=0)*(bh**np.abs(a/f))
+        if norm:
+            r/=np.sum(r)
+        return (f**gf)*r
+    return do
+def mag2(a):
+    return a.imag*a.imag+a.real*a.real
+
+def gwave1(t):
+    return t<(2**.5)-1
+def gwave2(t):
+    c = (2**.5)-1
+    return (t<c)*t/c+(t>=c)*(1-(t-c)/(1-c))
+def gwave0(t):
+    return (t==0)*len(t)
+
+#def fourier_resize(f,l):
+    
+    
+
+
+class fourier_filt:
+    def __init__(self,spec):
+        self.spec=spec
+    def filt_f(self,ft):
+        if len(self.spec) == len(ft):
+            return self.spec*ft
+        return sp.signal.resample(self.spec,len(ft))*ft
+    def filt_a(self,b):
+        return sp.fft.ifft(self.filt_f(sp.fft.fft(b)))
+    
+
+
+class vocode:
+    def __init__(self,l=1<<12,wave=gwave1,weight=mag2,wf=lambda f,a:np.ones(len(a))/len(a),voices=1,harms=1<<16):
+        self.wave = wave
+        self.waveBuf = wave(np.arange(l)/l)
+        self.waveFT = sp.fft.fft(self.waveBuf)
+        self.bl = l
+        self.buf = np.zeros(l,dtype=complex)
+        self.wbuf = np.zeros(l,dtype=complex)
+        self.buf_i = 0
+        self.window = 1-.5*np.cos(np.arange(l)*(2*np.pi/l))
+        self.harms = harms
+        self.mat = harm_mat(l,harms,wf)
+        self.weight_func = weight
+        self.voices = voices
+    def run(self,b):
+        res = []
+        l = self.bl
+        ft = sp.fft.fft(b)
+        for i in range(self.voices):
+            w = self.weight_func(ft)@self.mat
+            bf = np.argmax(w)+1
+            band_inds = fhpi_pos(l,bf,self.harms)
+            in_band = ft[band_inds]
+            tone = self.waveFT[band_inds//bf]
+            vfilt = in_band/tone
+            ft[band_inds]=0
+            res += [(bf,fourier_filt(vfilt))]
+        return res
+    def nur(self,a):
+        l = self.bl
+        ft = np.zeros(l,dtype=complex)
+        for bf,vfilt in a:
+            band_inds = fhpi_pos(l,bf,self.harms)
+            tone = self.waveFT[band_inds//bf]
+            ft[band_inds] += vfilt.filt_f(tone)
+        return sp.fft.ifft(ft)
+    def decoder(self):
+        return bufpk(self.bl,self.nur)
+    def __call__(self,v):
+        l = self.bl
+        hl = l//2
+        self.buf[self.buf_i+hl]=v
+        self.buf_i += 1
+        if self.buf_i >= hl:
+            self.buf_i = 0
+            self.wbuf[:] = self.buf[:]
+            self.wbuf *= self.window
+            self.buf[:hl] = self.buf[hl:]
+            self.buf[hl:] = 0
+            return self.run(self.wbuf)
+    def gen(self,sig):
+        for v in sig:
+            r = self(v)
+            if r is not None:
+                yield r
+    def rgen(self,vsig):
+        dc = self.decoder()
+        for v in vsig:
+            r = dc(v)
+            for i in r:
+                yield i
+        
+
+
+class split_noise:
+    def __init__(self,l=1<<12,t=1.75,sds = 4,nds = 16,margin=0):
+        self.bl = l
+        self.buf = np.zeros(l,dtype=complex)
+        self.wbuf = np.zeros(l,dtype=complex)
+        self.buf_i = 0
+        self.window = 1-.5*np.cos(np.arange(l)*(2*np.pi/l))
+        self.spargs = {"prominence":t,"width":(0,32),"rel_height":.9}
+        self.smooth = sds*fourier_freq_vals(l)/l
+        self.smooth *= self.smooth
+        self.smooth = np.exp(-self.smooth)
+        self.nsmooth = nds*fourier_freq_vals(l)/l
+        self.nsmooth *= self.nsmooth
+        self.nsmooth = np.exp(-self.nsmooth)
+        self.margin = margin
+    def run(self,b):
+        l = self.bl
+        ft = sp.fft.fft(b)
+        mft = mag2(ft)
+        mft = sp.fft.ifft((mfft:=sp.fft.fft(mft))*self.smooth).real
+        mfnf = sp.fft.ifft(mfft*self.nsmooth).real
+        mft /= mfnf+(mfnf==0)
+        pks,pps = sp.signal.find_peaks(mft,**self.spargs)
+        lb = np.clip(np.round(pps['left_ips']-self.margin).astype(int),0,l-1)
+        rb = np.clip(np.round(pps['right_ips']+self.margin).astype(int),0,l-1)
+        pk = np.zeros(l,dtype=int)
+        np.add.at(pk,lb,1)
+        np.add.at(pk,rb,-1)
+        pk = np.cumsum(pk)>0
+        sig = ft*pk
+        noi = ft-sig
+        return sig,noi
+    def nur(self,a):
+        l = self.bl
+        ft = np.zeros(l,dtype=complex)
+        sig,noi = a
+        ft += sig
+        ft += noi
+        return sp.fft.ifft(ft)
+    def decoder(self):
+        return bufpk(self.bl,self.nur)
+    def __call__(self,v):
+        l = self.bl
+        hl = l//2
+        self.buf[self.buf_i+hl]=v
+        self.buf_i += 1
+        if self.buf_i >= hl:
+            self.buf_i = 0
+            self.wbuf[:] = self.buf[:]
+            self.wbuf *= self.window
+            self.buf[:hl] = self.buf[hl:]
+            self.buf[hl:] = 0
+            return self.run(self.wbuf)
+    def gen(self,sig):
+        for v in sig:
+            r = self(v)
+            if r is not None:
+                yield r
+    def rgen(self,vsig):
+        dc = self.decoder()
+        for v in vsig:
+            r = dc(v)
+            for i in r:
+                yield i
+        
