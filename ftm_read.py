@@ -21,9 +21,11 @@ ftu = fr.ftm(fr.ftu.read())
 sts = fr.ftm(fr.sts.read())
 mix.out = (res:=[],(sumf([r[0]*0,r[1],r[2]*30*0,r[3]*0,r[4]*30*0,r[5]*0,r[6]*0,r[7]*0]) for r in savetee((lambda a:([next(v) for v in a[1:]] for i in a[0]))([ (i*(1+1j) for i in v) for v in fr.tsts(ftu,800,b=32.7) ]))))[1]
 """
-f = open("/Users/paul/Music/other/chiptune/nsf/The Prism's Eye FINAL 11-30-2015.ftm",'rb')
-ftu = open("/Users/paul/Music/other/chiptune/nsf/FamiTracker Modules/Face_the_Unknown_(Jayster).ftm","rb")
-sts = open("/Users/paul/Music/other/chiptune/nsf/FamiTracker Modules/Sunrise_to_Sunset_(Jayster).ftm","rb")
+def get_files():
+    f = open("/Users/paul/Music/other/chiptune/nsf/The Prism's Eye FINAL 11-30-2015.ftm",'rb')
+    ftu = open("/Users/paul/Music/other/chiptune/nsf/FamiTracker Modules/Face_the_Unknown_(Jayster).ftm","rb")
+    sts = open("/Users/paul/Music/other/chiptune/nsf/FamiTracker Modules/Sunrise_to_Sunset_(Jayster).ftm","rb")
+    return f,ftu,sts
 #notes:
 #it appears that the DPCM is 1 bit dpcm LSB first
 
@@ -1096,7 +1098,7 @@ class ftm: #todo: blocks have interblock dependencies, so pass self to the const
 
     def states_gen(self,song=0,EFFECT_SCALES = None):
         if EFFECT_SCALES == None:
-            EFFECT_SCALES = {'A':1/15,'4':1/16,'1':1/256,'3':1/256,'P':1/256,'Q':8/256,'7':1}
+            EFFECT_SCALES = {'A':1/15,'4':1/16,'1':8/256,'3':1/256,'P':1/256,'Q':8/256,'7':1}
         if type(song) is int:
             rg = self.row_gen(song)
         else:
