@@ -1,5 +1,26 @@
 import struct
+#use like this:
+"""
+from a import *
+import ftm_read as fr
+def savetee(g):
+    global res
+    for v in g:
+        res += [v]
+        yield v
 
+def sumf(v):
+ t = v[0]
+ for r in v[1:]:
+  t += r
+ return t
+
+(None,reload(fr))[0]
+ft = fr.ftm(fr.f.read())
+ftu = fr.ftm(fr.ftu.read())
+sts = fr.ftm(fr.sts.read())
+mix.out = (res:=[],(sumf([r[0]*0,r[1],r[2]*30*0,r[3]*0,r[4]*30*0,r[5]*0,r[6]*0,r[7]*0]) for r in savetee((lambda a:([next(v) for v in a[1:]] for i in a[0]))([ (i*(1+1j) for i in v) for v in fr.tsts(ftu,800,b=32.7) ]))))[1]
+"""
 f = open("/Users/paul/Music/other/chiptune/nsf/The Prism's Eye FINAL 11-30-2015.ftm",'rb')
 ftu = open("/Users/paul/Music/other/chiptune/nsf/FamiTracker Modules/Face_the_Unknown_(Jayster).ftm","rb")
 sts = open("/Users/paul/Music/other/chiptune/nsf/FamiTracker Modules/Sunrise_to_Sunset_(Jayster).ftm","rb")
@@ -1183,7 +1204,7 @@ class ftm: #todo: blocks have interblock dependencies, so pass self to the const
                         self.arp_y = y
                         self.arp_i = 0
                     elif cmd in '12':
-                        self.pitch_slide_speed = arg * (2*(cmd=="2")-1)
+                        self.pitch_slide_speed = arg * (2*(cmd=="1")-1)
                         self.portamento_speed = 0
                     elif cmd == '3':
                         self.portamento_speed = arg
@@ -1336,4 +1357,28 @@ class ftm: #todo: blocks have interblock dependencies, so pass self to the const
                     s.tick()
                 
 
+
+
+
+
+
+
+
+#easy func
+def sumf(v):       
+    t = v[0]          
+    for r in v[1:]:   
+        t += r           
+    return t
+def dotf(r,v=[],default=1):
+    t = 0
+    for i in range(len(r)):
+        if i >= len(v):
+            t += default*r[i]
+        else:
+            t += v[i]*r[i]
+    return t
+def play(fname,mix=[1/15,1/15,2,1/15,2],dm=1/15):
+    ft = ftm(open(fname,"rb").read())
+    yield from (dotf(r,mix,dm) for r in (lambda a:([next(v) for v in a[1:]] for i in a[0]))([ (i*(1+1j) for i in v) for v in tsts(ft,800,b=32.7) ]))
 
