@@ -112,6 +112,12 @@ def rand16():
         v[1] = (rrca8((v[0]^0xff)-1)+v[1])&0xff
         v[0] = ((v[1]-v[0])^162)&0xff
         yield v[1]
+def srand16():
+    v = [0,0]
+    while 1:
+        v[1] = (rrca8((v[0]^0xff)-1)+v[1])&0xff
+        v[0] = ((v[1]-v[0])^162)&0xff
+        yield v[1]+v[0]*1j
 def rand24():
     v = [0,0,0]
     while 1:
@@ -278,3 +284,12 @@ def gn(r,d,p=1):
             t += r
         t -= 1
         p *= d
+
+
+
+def np_mag2(v):
+    return np.dot(v.real,v.real)+np.dot(v.imag,v.imag)
+def purity(ft,b=1):
+    tone = np_mag2(ft[b])+np_mag2(ft[-b])
+    return tone/np_mag2(ft)
+    

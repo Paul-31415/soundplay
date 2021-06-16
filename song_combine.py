@@ -12,7 +12,8 @@ parser.add_argument('--s2',default=1<<12,type=int,help="fourier window size of o
 parser.add_argument('-a',default=1,type=float,help="alpha, how much to apply the transformation")
 parser.add_argument('--size',default=-1,type=int,help="compressed mode size cap")
 parser.add_argument('-m',default=False,action="store_true",help="match song's durations")
-
+parser.add_argument('--s1', default=0,type=float,help="start for source")
+parser.add_argument('--s2', default=0,type=float,help="start for target")
 
 args = parser.parse_args()
 
@@ -27,16 +28,18 @@ to = aud.audioFile(args.target)
 
 print("loading source file",end="\r")
 src[0]
-g = src.play(0)
+g = src.play(args.s1)
 print("loading target file",end="\r")
 to[0]
-gt = to.play(0)
+gt = to.play(args.s2)
 if args.m:
     print("resampling...       ",end="\r")
-    if len(src) > len(to):
-        gt = (i for i in scipy.signal.resample(np.fromiter(to,dtype=complex),len(src)))
+    ls = len(src)*(1-args.s1)
+    lt = len(to)*(1-args.s2)
+    if ls > lt:
+        gt = (i for i in scipy.signal.resample(np.fromiter(to,dtype=complex),int(ls)))
     else:
-        g = (i for i in scipy.signal.resample(np.fromiter(src,dtype=complex),len(to)))
+        g = (i for i in scipy.signal.resample(np.fromiter(src,dtype=complex),int(lt)))
 
 print ("progress (in samples):")
 

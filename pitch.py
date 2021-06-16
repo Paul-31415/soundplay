@@ -186,8 +186,7 @@ class window_resampler:
         for v in g:
             yield self(v)
     def fgen(self,g):
-        for v in flat(self.gen(g)):
-            yield v
+        yield from flat(self.gen(g))
 class window_func:
     def __init__(self,thing,size=256,window=lambda x:math.cos(x*math.pi)/2+1,mult=2):
         self.times=mult
@@ -223,8 +222,7 @@ class fourier_max_note_estimator:
         f = sp.fft.fft(b)
         return ftft(np.argmax(abs(f)),len(f))
     def __call__(self,g):
-        for v in self.w.gen(g):
-            yield v
+        yield from self.w.gen(g)
 fmne = fourier_max_note_estimator
     
 def halfshift(a):
@@ -246,8 +244,7 @@ class ft_space_func:
     def __call__(self,v):
         return self.windower(v)
     def gen(self,g):
-        for v in self.windower.gen(g):
-            yield v
+        yield from self.windower.gen(g)
 class ft_re2:
     def __init__(self,p=16):
         self.p = p
@@ -318,12 +315,45 @@ class ft_rep_p:
         pk = np.concatenate((np.array([0]),sp.signal.find_peaks(a,*self.a)[0],np.array([l])))
         return pk
 def regions_stitch(b,d,p1,p2):
+    p1 = p1.astype(int)
+    p2 = p2.astype(int)
     adj = np.diff(p1)
     inds = np.ones(len(b),dtype=int)
     inds[0] = 0
     np.add.at(inds,p1[:-1]+adj//2,np.diff(p2)-adj)
     np.add.at(d,np.cumsum(inds,out=inds)%len(d),b)
     return d
+def regions_stitch_triangular(b,d,p1,p2):
+    dists = np.zeros(len(b),dtype=float)
+    adj = np.diff(p1)
+    dists[p1[:-1]] = np.diff(np.concatenate((np.zeros(1),adj)))
+    np.cumsum(dists,out=dists)
+
+    #every_other = np.zeros(len(b),dtype=int)
+    #np.add.at(every_other,p1,1)
+    #np.cumsum(every_other,out=every_other)
+    #every_other = (every_other&1)==1
+    
+    triangles = 1/(dists+(dists==0)/2)
+    np.cumsum(triangles,out=triangles)
+    triangles %= 2
+    triangles -= 2*(triangles-1)*(triangles>1)
+    #p1[::2] is at trophs
+    rtriangles = 1-triangles
+
+    #triangles,rtriangles = rtriangles,triangles
+    
+    inds1 = np.ones(len(b),dtype=int)
+    inds1[0] = 0
+    np.add.at(inds1,p1[::2][:-1],np.diff(p2[::2])-np.diff(p1[::2]))
+    np.add.at(d,np.cumsum(inds1,out=inds1)%len(d),b*triangles)
+
+    inds2 = np.ones(len(b),dtype=int)
+    inds2[0] = 0
+    np.add.at(inds2,p1[1::2][:-1],np.diff(p2[1::2])-np.diff(p1[1::2]))
+    np.add.at(d,np.cumsum(inds2,out=inds2)%len(d),b*rtriangles)
+    return d
+
 class fpa:
     def __init__(self,size,wf = lambda x:math.cos(x*math.pi)/2+1):
         self.window = np.array([wf((i/(size-1))*2-1) for i in range(size)],dtype=complex)
@@ -385,6 +415,20 @@ def mt_s(to,s1=1<<12,s2=1<<12,sp1=1,sp2=1,alpha=1):
     return window_resampler(ft_re(s1,s2/s1,lambda a,sf:a*(1-alpha)+alpha*round_aa(a,next(ng)),sp1),s1,s2)
 def round_aa(v,r,*a):
     return r[np.searchsorted(r[1:]+r[:-1],v*2)]
+def fourier_fmult(f,m=1,l=1<<12):
+    if m == 1:
+        return f
+    return ((f-l*(f>=l/2))*m)%l
+def round_aa_with_fmults_curry(mults = [1],l=1<<12):
+    import sortednp
+    def round_aa_mults(v,r,*ar):
+        a = np.array([])
+        for f in mults:
+            a = sortednp.merge(fourier_fmult(r,f,l),a)
+        return round_aa(v,a,*ar)
+    return round_aa_mults
+        
+        
 def rm__map_sorted(p,pt,a,at):
     sind = np.argsort(a[p[1:-2].astype(int)])+1 #a[p][sind] is sorted
     sindt = np.argsort(at[pt[1:-2].astype(int)])+1 #at[pt][sindt] is sorted
@@ -395,17 +439,22 @@ def rm__map_sorted(p,pt,a,at):
         res[sind] = pt[sindt[:len(sind)]]
     return res
 
-
-def mt_pq(to,q1=.98,q2=.98,alpha=1,s1=1<<12,s2=1<<12,st=1<<12,rounding_mode=round_aa,q_mode=quantile_lookups):
-    return window_resampler(mt_pq_(to,q1,q2,alpha,s1,s2,st,rounding_mode,q_mode),s1,s2)
+def mt_pqnfm(to,q1=32,q2=32,m=[1],s1=1<<12,s2=1<<12,st=1<<12):
+    return mt_pqn(to,q1,q2,s1=s1,s2=s2,st=st,rounding_mode=round_aa_with_fmults_curry(m,s2))
+def mt_pqn(to,q1=32,q2=32,m1=1,m2=1,alpha=1,s1=1<<12,s2=1<<12,st=1<<12,rounding_mode=round_aa,q_mode=numile_lookups):
+    return mt_pq(to,q1,q2,m1,m2,alpha,s1,s2,st,rounding_mode,q_mode)
+def mt_pq(to,q1=.98,q2=.98,m1=1,m2=1,alpha=1,s1=1<<12,s2=1<<12,st=1<<12,rounding_mode=round_aa,q_mode=quantile_lookups):
+    return window_resampler(mt_pq_(to,q1,q2,m1,m2,alpha,s1,s2,st,rounding_mode,q_mode),s1,s2)
 class mt_pq_:
-    def __init__(self,to,q1=1,q2=1,alpha=1,s1=1<<12,s2=1<<12,st=1<<12,rounding_mode=round_aa,q_mode=quantile_lookups):
+    def __init__(self,to,q1=1,q2=1,m1=1,m2=1,alpha=1,s1=1<<12,s2=1<<12,st=1<<12,rounding_mode=round_aa,q_mode=quantile_lookups):
         self.to = window_func(lambda x:x,st).gen(to)
         self.s1 = s1
         self.s2 = s2
         self.st = st
         self.q1 = q1
         self.q2 = q2
+        self.m1 = m1
+        self.m2 = m2
         self.alpha = alpha
         self.rounding_mode = rounding_mode
         self.quant = q_mode
@@ -419,9 +468,9 @@ class mt_pq_:
         at = abs(ft)
         pt = sp.signal.find_peaks(at)[0]
         p = sp.signal.find_peaks(a)[0]
-        qpt = self.quant(at,pt,self.q2)
+        qpt = fourier_fmult(self.quant(at,pt,self.q2),self.m2,len(at))
         pt = np.concatenate((np.array([0]),qpt,(np.array([self.st-1]))))*((l-1)/(self.st-1))
-        qp = self.quant(a,p,self.q1)
+        qp = fourier_fmult(self.quant(a,p,self.q1),self.m1,len(a))
         p = np.concatenate((np.array([0]),qp,(np.array([l-1]))))
         rp = self.rounding_mode(p,pt,a,at)*self.alpha+p*(1-self.alpha)
         regions_stitch(f,r,p,rp%l)
@@ -526,8 +575,7 @@ def flat(g):
             yield v
             continue
         try:
-            for r in flat(v):
-                yield r
+            yield from flat(v)
         except:
             yield v
 
@@ -908,8 +956,7 @@ class fourier_note_components:
 fnc = fourier_note_components
 def genify(g):
     try:
-        for v in g:
-            yield v
+        yield from g
     except:
         while 1:
             yield g
@@ -1078,43 +1125,67 @@ class vocode:
         dc = self.decoder()
         for v in vsig:
             r = dc(v)
-            for i in r:
-                yield i
+            yield from r
+
         
 
-
+def fgaussb(l,sd):
+    r = sd*fourier_freq_vals(l)/l
+    r *= r
+    return np.exp(-r)
 class split_noise:
-    def __init__(self,l=1<<12,t=1.75,sds = 4,nds = 16,margin=0):
+    def __init__(self,l=1<<12,t=4/3,sds = 4,nds = 16,pds=4,margin=0):
         self.bl = l
         self.buf = np.zeros(l,dtype=complex)
         self.wbuf = np.zeros(l,dtype=complex)
         self.buf_i = 0
         self.window = 1-.5*np.cos(np.arange(l)*(2*np.pi/l))
-        self.spargs = {"prominence":t,"width":(0,32),"rel_height":.9}
-        self.smooth = sds*fourier_freq_vals(l)/l
-        self.smooth *= self.smooth
-        self.smooth = np.exp(-self.smooth)
-        self.nsmooth = nds*fourier_freq_vals(l)/l
-        self.nsmooth *= self.nsmooth
-        self.nsmooth = np.exp(-self.nsmooth)
+        self.spargs = {"prominence":t,"width":(0,32),"rel_height":3/4}
+        self.smooth = fgaussb(l,sds)
+        self.nsmooth = fgaussb(l,nds)
+        self.psmooth = fgaussb(l,pds)
         self.margin = margin
+        self.phase_t = 1
+        self.norm_t = .001
+    def set_sd(self,sds):
+        self.smooth = fgaussb(self.bl,sds)
+    def set_nd(self,nds):
+        self.nsmooth = fgaussb(self.bl,nds)
+    def set_pd(self,pds):
+        self.psmooth = fgaussb(self.bl,pds)
     def run(self,b):
-        l = self.bl
         ft = sp.fft.fft(b)
+        pk = self.run_get_mask_from_peaks(*self.run_get_peaks(ft))
+        sig = ft*pk
+        noi = ft-sig
+        return sig,noi
+    def run_get_peaks(self,ft):
+        aft = np.angle(ft)
+        aft -= np.roll(aft,1)
+        aft %= np.pi
+        aft -= np.roll(aft,-1)
+        aft += np.pi/2
+        aft %= np.pi
+        aft -= np.pi/2
+
+        saft = 1+sp.fft.ifft(sp.fft.fft((2*aft/np.pi)**2)*self.psmooth).real*self.phase_t
+        
         mft = mag2(ft)
         mft = sp.fft.ifft((mfft:=sp.fft.fft(mft))*self.smooth).real
-        mfnf = sp.fft.ifft(mfft*self.nsmooth).real
+        mfnf = sp.fft.ifft(mfft*self.nsmooth).real+self.norm_t
         mft /= mfnf+(mfnf==0)
-        pks,pps = sp.signal.find_peaks(mft,**self.spargs)
+        mft /= saft
+        return sp.signal.find_peaks(mft,**self.spargs)
+    def run_get_mask_from_peaks(self,pks,pps):
+        l = self.bl
         lb = np.clip(np.round(pps['left_ips']-self.margin).astype(int),0,l-1)
         rb = np.clip(np.round(pps['right_ips']+self.margin).astype(int),0,l-1)
         pk = np.zeros(l,dtype=int)
         np.add.at(pk,lb,1)
         np.add.at(pk,rb,-1)
         pk = np.cumsum(pk)>0
-        sig = ft*pk
-        noi = ft-sig
-        return sig,noi
+        return pk
+    
     def nur(self,a):
         l = self.bl
         ft = np.zeros(l,dtype=complex)
@@ -1145,6 +1216,426 @@ class split_noise:
         dc = self.decoder()
         for v in vsig:
             r = dc(v)
-            for i in r:
-                yield i
+            yield from r
+
+    def plot_gen(self,g,frames=1<<11):
+        g = self.gen(g)
+        mn = np.zeros((self.bl,frames),dtype=complex)
+        ms = np.zeros((self.bl,frames),dtype=complex)
+        for i in range(frames):
+            ms[:,i],mn[:,i] = next(g)
+            print(f"{i}/{frames}      ",end="\r")
+        from matplotThings import plotimgs
+        plotimgs(ms,mn)
+    
+
+def snn_noise_temposcale(snn,ol=1<<15):
+    fn = ol/snn.bl
+    il = snn.bl
+    def do(buf):
+        #buf is noise
+        pks,pkk = snn.run_get_peaks(buf)
+        #nm = snn.run_get_mask_from_peaks(pks,pkk)
+        sig = np.zeros(ol,dtype=complex)
+        regions_stitch_triangular(buf,sig,pks,(fn*pks)%len(sig))
+        return sig
+                
+    return window_resampler(do,il,ol)
+
+    
+def snn_for_irl():
+    sn = split_noise(1<<14)
+    sn.set_sd(2400)
+    sn.set_nd(4800)
+    sn.phase_t = 0
+    sn.norm_t = 0
+    sn.spargs = {'prominence': 0, 'width': 0, 'rel_height': 1}
+    return sn
         
+
+        
+
+def sn_ptscale(sn,ol=1<<12,fs=1,fn=None,snn=None,ns=1,ss=1):
+    try:
+        fs*2
+        fs = lambda x,f=fs: x*f
+    except:
+        pass
+    if fn is None:
+        fn = ol/sn.bl
+    try:
+        fn*2
+        fn = lambda x,f=fn: x*f
+    except:
+        pass
+    if snn is None:
+        snn = sn
+    il = sn.bl
+    def do(buf):
+        #separate sig and noise
+        ft = sp.fft.fft(buf)
+        sigmask = sn.run_get_mask_from_peaks(*sn.run_get_peaks(ft))
+        noise = sp.fft.ifft(ft*(1-sigmask))
+        m2 = (ft*ft.conjugate()).real
+        pks,pkk = sp.signal.find_peaks(sigmask)
+        sigf = np.zeros(ol,dtype=complex)
+        regions_stitch(ft*sigmask,sigf,pks,fs(pks)%len(sigf))
+        sig = sp.fft.ifft(sigf)*ss
+
+        pks,pkk = snn.run_get_peaks(noise)
+        #nm = snn.run_get_mask_from_peaks(pks,pkk)
+        
+        regions_stitch_triangular(noise*ns,sig,pks,fn(pks)%len(sig))
+        return sig
+        
+        
+    return window_resampler(do,il,ol)
+
+        
+        
+class fake_sn_all_noise:
+    def __init__(self,l=1<<12):
+        self.bl = l
+    def run_get_mask_from_peaks(self,a,b):
+        return np.zeros(self.bl)
+    def run_get_peaks(self,ft):
+        return np.array([]),{}
+class fake_sn_all_signal:
+    def __init__(self,l=1<<12):
+        self.bl = l
+    def run_get_mask_from_peaks(self,a,b):
+        return np.ones(self.bl)
+    def run_get_peaks(self,ft):
+        return np.array([]),{}
+    
+def sn_for_irl():
+    sn = split_noise()
+    sn.set_sd(3)
+    sn.set_nd(64)
+    sn.set_pd(16)
+    sn.phase_t = 1
+    sn.norm_t = 0
+    sn.spargs = {'prominence': 1, 'width': (0, 32), 'rel_height': 0.8}
+    return sn
+def sn_for_chiptune():
+    sn = split_noise()
+    sn.set_sd(4)
+    sn.set_nd(8)
+    sn.set_pd(16)
+    sn.phase_t = -.875
+    sn.norm_t = 1
+    sn.spargs = {'prominence': 1.1, 'width': (0, 12), 'rel_height': 0.875}
+    return sn
+
+class split_noise_p:#todo: this one should use phase and hopefully separate overlapping noise and signal
+    def __init__(self,l=1<<12):
+        pass
+
+
+                
+
+#todo next
+#cepstrum like thingy for vocoding
+# peaks(fft(lowPass(mag2(fft))))
+# or peaks(fft( lowPass(mag2(fft))/lowerPass(mag2(fft)) )) like in split_noise
+
+
+class cep_note:
+    def __init__(self,l=1<<12,sds = 4,nds = 16,pds=4):
+        self.bl = l
+        self.buf = np.zeros(l,dtype=complex)
+        self.wbuf = np.zeros(l,dtype=complex)
+        self.buf_i = 0
+        self.window = 1-.5*np.cos(np.arange(l)*(2*np.pi/l))
+        self.smooth = fgaussb(l,sds)
+        self.nsmooth = fgaussb(l,nds)
+        self.psmooth = fgaussb(l,pds)
+        self.phase_t = 0
+        self.divoffset = .01
+        self.hm = harm_mat(l)
+    def set_sd(self,sds):
+        self.smooth = fgaussb(self.bl,sds)
+    def set_nd(self,nds):
+        self.nsmooth = fgaussb(self.bl,nds)
+    def set_pd(self,pds):
+        self.psmooth = fgaussb(self.bl,pds)
+    def run(self,b): 
+        l = self.bl
+        ft = sp.fft.fft(b)
+
+        aft = np.angle(ft)
+        aft -= np.roll(aft,1)
+        aft %= np.pi
+        aft -= np.roll(aft,-1)
+        aft += np.pi/2
+        aft %= np.pi
+        aft -= np.pi/2
+
+        saft = 1+sp.fft.ifft(sp.fft.fft((2*aft/np.pi)**2)*self.psmooth).real*self.phase_t
+        
+        mft = mag2(ft)
+        mft = sp.fft.ifft((mfft:=sp.fft.fft(mft))*self.smooth).real
+        mfnf = sp.fft.ifft(mfft*self.nsmooth).real
+        mft /= mfnf+self.divoffset
+        
+        ct = sp.fft.fft(mft)
+        ct[0] = 0
+        rv = ct.real@self.hm
+        
+        return rv
+    def __call__(self,v):
+        l = self.bl
+        hl = l//2
+        self.buf[self.buf_i+hl]=v
+        self.buf_i += 1
+        if self.buf_i >= hl:
+            self.buf_i = 0
+            self.wbuf[:] = self.buf[:]
+            self.wbuf *= self.window
+            self.buf[:hl] = self.buf[hl:]
+            self.buf[hl:] = 0
+            return self.run(self.wbuf)
+    def gen(self,sig):
+        for v in sig:
+            r = self(v)
+            if r is not None:
+                yield r
+    def plot_gen(self,g,frames=1<<11,s=1,h=4):
+        g = self.gen(g)
+        m = np.zeros((self.bl//2,frames))#,dtype=complex)
+        for i in range(frames):
+            m[:,i] = next(g)
+            print(f"{i}/{frames}      ",end="\r")
+        from matplotThings import plotimgs
+        plotimgs(np.clip(m,0,h))
+        #plotimgs(m*s)
+
+
+
+#todo next:
+#  note picker algorithm
+# use find_peaks to make it work in O(notes*harmonics) python steps instead of O(len)
+#
+
+#todo next:
+#  multi transform compressor
+# find fourier peaks and wavelet/chirplet peaks
+# use linearity well
+# perhaps make it take as args what kinda transforms to use
+#
+class transform:
+    def __init__(self):
+        pass
+    def __call__(self,b):
+        return np.copy(b)
+    def inverse(self,b):
+        return b
+    def flatten(self,b):
+        return b
+    def unflatten(self,r):
+        return r
+class fourier(transform):
+    def __init__(self):
+        pass
+    def __call__(self,b):
+        return sp.fft.fft(b)
+    def inverse(self,b):
+        return sp.fft.ifft(b)
+class harmier(transform):
+    def __init__(self,l=1<<12,harms=[2**-i for i in range (16)]):
+        mat = np.eye(l,dtype=complex)
+        ha = np.array(harms)
+        for i in range(1,l//2):
+            ll = len(mat[i,i:min(i*(1+len(ha)),l//2):i])
+            mat[i,i:min(i*(1+len(ha)),l//2):i] = ha[:ll]
+            mat[-i,-i:-min(i*(1+len(ha)),l//2):-i] = ha[:ll]
+        self.mat = sp.sparse.csc_matrix(mat)
+        self.inv = sp.sparse.linalg.inv(self.mat)
+    def __call__(self,b):
+        return sp.fft.fft(b)@self.inv
+    def inverse(self,b):
+        return sp.fft.ifft(b@self.mat)
+def harmier_phase_series(l,harms,step=1j,n=4):
+    f = 1
+    for i in range(n):
+        h = []
+        p = f
+        for j in range(len(harms)):
+            h += [p*harms[j]]
+            p *= f
+        yield harmier(l,h)
+        f *= step
+
+    
+class gausslet(transform):
+    def __init__(self,l=1<<12,width=16,sds=4):
+        mat = np.eye(l,dtype=complex)
+        gau = fgaussb(l,width)
+        for i in range(l//width):
+            
+            for j in range(width):
+                assert False
+class sinclet(transform):
+    def __init__(self,l=1<<12,width=16):
+        self.width = width
+        mat = np.eye(l,dtype=complex)
+        basi = np.eye(width,dtype=complex)
+        for i in range(width):
+            z = np.zeros(width)
+            z[i] = 1
+            basi[i,:] = sp.fft.ifft(z)
+        for i in range(l):
+            b = i//width
+            w = i%width
+            mat[i,b:b+width] = basi[w]
+        self.mat = sp.sparse.csc_matrix(mat)
+        self.inv = sp.sparse.linalg.inv(self.mat)
+    def __call__(self,b):
+        return sp.fft.fft(b)@self.inv
+    def inverse(self,b):
+        return sp.fft.ifft(b@self.mat)
+import pywt
+class wavelet(transform):
+    def __init__(self,l=1<<12,fam="haar"):
+        self.wavelet = fam
+        bz = np.zeros(l,dtype=complex)
+
+        wt = pywt.wavedec(bz,self.wavelet)
+        self.weights = [i*0 for i in wt]
+        for i in range(len(wt)):
+            for j in range(len(wt[i])):
+                wt[i][:] = 0
+                wt[i][j] = 1
+                self.weights[i][j] = np.sum(mag2(pywt.waverec(wt,self.wavelet)))
+        self.l = l
+    def __call__(self,b):
+        assert len(b) == self.l
+        d = pywt.wavedec(b,self.wavelet)
+        return [d[i]*self.weights[i] for i in range(len(d))]
+    def inverse(self,b):
+        if len(b) != len(self.weights):
+            raise Exception("length mismatch",self.wavelet,b)
+        return pywt.waverec([b[i]/self.weights[i] for i in range(len(b))],self.wavelet)
+        return pywt.waverec(b,self.wavelet)
+    def flatten(self,b):
+        return np.concatenate(b)
+    def unflatten(self,r):
+        res = []
+        i = 0
+        for l in self.weights:
+            res += [r[i:i+len(l)]]
+            i += len(l)
+        return res
+        
+        
+    
+class mulitbasis_compressor:
+    def __init__(self,l=1<<12,bases=[transform()],q=.95,c=1):
+        self.bases = bases
+        self.bl = l
+        self.buf = np.zeros(l,dtype=complex)
+        self.wbuf = np.zeros(l,dtype=complex)
+        self.buf_i = 0
+        self.window = 1-.5*np.cos(np.arange(l)*(2*np.pi/l))
+
+        self.quantile = q
+        self.cycles = c
+    def run(self,b): 
+        l = len(self.bases)
+        tfs = [base(b) for base in self.bases]
+        accs = [self.bases[i].flatten(tfs[i]) for i in range(l)]
+        totals = [b*0 for b in accs]
+        for p in range(self.cycles):
+            mb = 0
+            m = -1
+            mv = -1
+            mi = -1
+            for j in range(l):
+                m2 = mag2(accs[j])
+                ami = (m2>=np.quantile(m2,self.quantile))
+                amv = accs[j][ami]
+                if (v:=np.sum(mag2(ami))) > m:
+                    mb = j
+                    m = v
+                    mi = ami
+                    mv = amv
+            totals[mb][mi] += mv
+            accs[mb][mi] = 0
+            b = self.bases[mb].inverse(self.bases[mb].unflatten(accs[mb]))
+            for i in range(l):
+                if i != mb:
+                    accs[i] = self.bases[i].flatten(self.bases[i](b))
+        return ([self.bases[i].unflatten(totals[i]) for i in range(l)],b)
+    
+    def nur(self,a):
+        l = self.bl
+        t,b = a
+        for i in range(len(self.bases)):
+            b += self.bases[i].inverse(t[i])
+        return b
+    def decoder(self):
+        return bufpk(self.bl,self.nur)
+    def __call__(self,v):
+        l = self.bl
+        hl = l//2
+        self.buf[self.buf_i+hl]=v
+        self.buf_i += 1
+        if self.buf_i >= hl:
+            self.buf_i = 0
+            self.wbuf[:] = self.buf[:]
+            self.wbuf *= self.window
+            self.buf[:hl] = self.buf[hl:]
+            self.buf[hl:] = 0
+            return self.run(self.wbuf)
+    def gen(self,sig):
+        for v in sig:
+            r = self(v)
+            if r is not None:
+                yield r
+    def rgen(self,vsig):
+        dc = self.decoder()
+        for v in vsig:
+            r = dc(v)
+            yield from r
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#beat detection by low pass of power
+class beat_detector:
+    def __init__(self,filt):
+        self.f = filt
+        self.prev = 0
+        self.pasc = False
+    def __call__(self,v):
+        v = self.f((v*v.conjugate()).real)
+        r = None
+        if v <= self.prev and self.pasc:
+            r = self.prev
+        self.pasc = v>self.prev
+        self.prev = v
+        return r
+
+
+
+
+
+            

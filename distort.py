@@ -856,6 +856,8 @@ def delay(samples=0,wet=1):
             buf.push(v)
     return delayCurry
 
+
+#https://ccrma.stanford.edu/~jos/pasp/Schroeder_Reverberators.html
 def schroeder_allpass(gain=.7,t=1051):
     def schroeder_allpassCurry(g):#,gain=gain,t=t):
         buf = [0]*t
@@ -979,6 +981,34 @@ def schroeder_nat_reverb_filt1(gain=.7,t=8000,fb=lambda x:x,dg0 = .7,dd0=1051,df
             yield (1-gain*gain)*out-gain*v
     return schroeder_nat_reverbCurry
 
+#stereo-ify through reverb: ((.5+.5j)*(i.real+i.imag)+1*(.5-.5j)*(i.real-i.imag) for i in schroeder_nat_reverb_filt1(.2,fb=lambda x: x*(eone**(-.1j)),dg0=.3,dfb=lambda x:x*(.9+.3j))(g))
+
+
+#comb filter stereoify
+class schroeder_comb_matrix4:
+    def __init__(self,g1=.773,l1=1687,g2=.802,l2=1601,g3=.753,l3=2053,g4=.733,l4=2251):
+        self.lens = l1,l2,l3,l4
+        self.gains = g1,g2,g3,g4
+    def __call__(self,g):
+        cs = [[0]*l for l in self.lens]
+        ci = [0]*4
+        for v in g:
+            for i in range(4):
+                cs[i][ci[i]] *= self.gains[i]
+                cs[i][ci[i]] += v*(1-self.gains[i])
+                ci[i] = (ci[i]+1)%len(cs[i])
+            s1 = cs[0][ci[0]]+cs[2][ci[2]]
+            s2 = cs[1][ci[1]]+cs[3][ci[3]]
+            yield (s1+s2,s1-s2)
+
+def default_schroeder(g,s=1):
+    yield from (a*1j+b for a,b in schroeder_comb_matrix4(l1=int(1687*s),
+                                                         l2=int(1601*s),
+                                                         l3=int(2053*s),
+                                                         l4=int(2251*s))
+                (schroeder_nat_reverb3(dd0=int(347*s),dd1=int(113*s),dd2=int(37*s))(g)))
+
+
 
 import math
 def fmeydist(x,f=1,g=1,d=8):
@@ -1031,6 +1061,9 @@ def roundish(x,ss=.1,power=3):
     i = round(x)
     e = x-i
     return ss*(i+sign(e)/2*abs(2*e)**power)
+
+
+
     #maximum gain is when rounding up to 1
     # x < 1
     # i = 1
@@ -1577,3 +1610,476 @@ def btwangf(s=128):
         p[0] = cround(v*s)
         return ca(p[0],pr)/s
     return do
+
+
+
+
+
+
+
+
+def kspr(k=.1,d=.99):
+ def do(v,k=k,d=d,x=[0,0]):
+  x[1] *= d
+  x[1] -= (x[0]-v)*k
+  x[0] += x[1]
+  return x[0]
+ return do
+
+def kine(force):
+ def do(v,f=force,x=[0,0]):
+     x[1] += f(v,*x)
+     x[0] += x[1]
+     return x[0]
+ return do
+
+def magclip(v,m=1):
+    if (a:=abs(v))>m:
+        return m*v/a
+    return v
+
+def stsd(f=.001,d=.0001):
+    return kine(lambda a,b,v: magclip((a-b),f)-magclip(v,d))
+
+def kthing(p=2,d=3):
+    kine(lambda a,b,v: magclip((a-b)*(abs(a-b)**p),1)-magclip(v,min(1,abs(a-b)**d)))
+
+
+
+def flutter_li(gen,fgen):
+    p = next(gen)
+    n = next(gen)
+    t = 0
+    for v in fgen:
+        t += v
+        while t >= 1:
+            p,n = n,next(gen)
+            t -= 1
+        yield t*n+p*(1-t)
+
+def cflutter_c(ff):
+    def cflutter(gen,fgen,*a):
+        from itertools import tee
+        g1,g2 = tee(gen)
+        f1,f2 = tee(fgen)
+        gr = ff((i.real for i in g1),(i.real for i in f1),*a)
+        gi = ff((i.imag for i in g2),(i.imag for i in f2),*a)
+        for v in gr:
+            yield v+1j*next(gi)
+    return cflutter
+cflutter_li = cflutter_c(flutter_li)
+
+def flutter_2i(gen,fgen):
+    p = next(gen)
+    c = next(gen)
+    n = next(gen)
+    t = 0
+    for v in fgen:
+        t += v
+        while t >= 1:
+            p,c,n = c,n,next(gen)
+            t -= 1
+        #fit from mathematica with x mat:
+        #[1 -1  1]          [0   1   0]
+        #[1  0  0]  -inv->  [-.5 0  .5]
+        #[1  1  1]          [.5 -1  .5]
+        #so, C = c
+        #    B = .5(n-p)
+        #    A = .5(n+p)-c
+        yield t*t*(.5*(n+p)-c)+t*.5*(n-p)+c
+cflutter_2i = cflutter_c(flutter_2i)
+
+def flutter_3i(gen,fgen):
+    p = next(gen)
+    c = next(gen)
+    n = next(gen)
+    o = next(gen)
+    t = 0
+    for v in fgen:
+        t += v
+        while t >= 1:
+            p,c,n,o = c,n,o,next(gen)
+            t -= 1
+        #fit from mathematica with x mat:
+        #[1 -1  1 -1]          [0    1    0    0 ]
+        #[1  0  0  0]  -inv->  [-1/3 -1/2 1 -1/6 ]
+        #[1  1  1  1]          [1/2 -1   1/2   0 ]
+        #[1  2  4  8]          [-1/6 1/2 -1/2 1/6]
+        #so, D = c
+        #    C = n-(2p+3c+o)/6
+        #    B = (n+p)/2-c
+        #    A = (3c+o-3n-p)/6
+        yield ((((c-n)/2+(o-p)/6)*t-c+(n+p)/2)*t+n-c/2-o/6-p/3)*t+c
+cflutter_3i = cflutter_c(flutter_3i)
+
+def flutter_4i(gen,fgen):
+    r = next(gen)
+    p = next(gen)
+    c = next(gen)
+    n = next(gen)
+    o = next(gen)
+    t = 0
+    for v in fgen:
+        t += v
+        while t >= 1:
+            r,p,c,n,o = p,c,n,o,next(gen)
+            t -= 1
+        yield ((((c/4-n/6+o/24-p/6+r/24)*t-n/6+o/12+p/6-r/12)*t-5*c/4+2*n/3-o/24+2*p/3-r/24)*t+2*n/3-o/12-2*p/3+r/12)*t+c 
+cflutter_4i = cflutter_c(flutter_4i)
+def flutter_5i(gen,fgen):
+    r = next(gen)
+    p = next(gen)
+    c = next(gen)
+    n = next(gen)
+    o = next(gen)
+    v = next(gen)
+    t = 0
+    for v in fgen:
+        t += v
+        while t >= 1:
+            r,p,c,n,o,v = p,c,n,o,v,next(gen)
+            t -= 1
+        yield c+t*(-c/3+n-o/4-p/2+r/20+v/30+t*(-5*c/4+2*n/3-o/24+2*p/3-r/24+t*(5*c/12-7*n/12+7*o/24-p/24-r/24-v/24+t*(c/4-n/6+o/24-p/6+r/24+t*(-c/12+n/12-o/24+p/24-r/120+v/120)))))
+cflutter_5i = cflutter_c(flutter_5i)
+
+def flutter_ni_c(hfa=[]):
+    def flutter(gen,fgen,hfa=hfa):
+        l = len(hfa)
+        a = [0]*l
+        t = 0
+        ai = 0
+        for v in fgen:
+            t += v
+            while t >= 1:
+                a[ai] = next(gen)
+                ai = (ai+1)%l
+                t -= 1
+            r = 0
+            for j in range(l):
+                r *= t
+                for i in range(l):
+                    r += a[(ai+i+1)%l]*hfa[j][i]
+            yield r
+
+def gaus(x):
+    return np.exp(-x*x)
+
+def flutter_sinc(gen,sgen,res=3,sds=3):
+    vals = np.zeros(res*sds,dtype=complex)
+    times = np.arange(res*sds)-((res*sds)>>1)
+    filt = lambda t: np.sinc(t)*gaus(t/res)
+    t = 0
+    for s in sgen:
+        t += s
+        while t >= 1:
+            vals[:-1] = vals[1:]
+            vals[-1] = next(gen)
+            t -= 1
+        yield np.dot(vals,filt(times-t))  
+cflutter_sinc = cflutter_c(flutter_sinc)
+
+"""
+def flutter_sinc(gen,sgen,res=36,num=16):
+    times = np.zeros(num)
+    vals = np.zeros(num,dtype=complex)
+    filt = lambda t: np.sinc(t)*np.exp(-(t*t/res))
+    for s in sgen:
+        
+        
+        yield np.dot(vals,filt(times))
+"""
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        
+import struct
+def remExp(x):
+    x = float(x)
+    return struct.unpack('<d',((1 .from_bytes(struct.pack('<d',x),'little')&0x800fffffffffffff)|0x3fe0000000000000).to_bytes(8,'little'))[0]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import numpy as np
+import scipy as sp
+
+def make_square_note(p=110,l=8192,e=1):
+    pf = math.ceil(p/2)*2
+    lf = round(l*pf/p)
+    i = np.arange(lf)
+    nb = ((i%pf)<=pf/2)*2.-1
+    nb *= np.exp(-e*i/lf)*(1-i/lf)
+    return sp.signal.resample(nb,l)
+def make_square_notes(l=8192,n=128,e=1):
+    import numpy as np
+    import scipy as sp
+    notes = np.zeros((128,l),dtype=float)
+    for i in range(128):
+        p = 48000/(440*2**((i-64)/12))
+        notes[i,:] = make_square_note(p,l,e)
+    return notes
+
+class note_seq_thingy:
+    def __init__(self,notes=None):
+        if notes is None:
+            notes = make_square_notes()
+        self.notes = notes
+        self.buf = np.zeros((notes.shape[1]),dtype=complex)
+    def gen(self,g):
+        def then(a,b):
+            yield from a
+            yield from b
+        g = then(g,(0 for i in range(len(self.buf))))
+        for i in range(len(self.buf)):
+            self.buf[i] = next(g)
+        for v in g:
+            if self.buf[0] == 0:
+                yield (0,0)
+                self.buf[:-1] = self.buf[1:]
+            else:
+                res = self.buf-self.notes/np.array([self.notes[:,0]]).T*self.buf[0]
+                #energy removal:
+                rem = np.sum((res*res.conjugate()).real,axis=1)
+                #minimax:
+                #rem = np.max(np.array([np.max(np.abs(res.real),axis=1),np.max(np.abs(res.imag),axis=1)]),axis=0)
+                im = np.argmin(rem)
+                yield (self.buf[0]/self.notes[im,0],im)
+                self.buf[:-1] = res[im,1:]
+            self.buf[-1] = v
+    def ungen(self,g):
+        for v in g:
+            m,f = v
+            self.buf += m*self.notes[f,:]
+            yield self.buf[0]
+            self.buf[:-1] = self.buf[1:]
+            self.buf[-1] = 0
+        for i in range(len(self.buf)-1):
+            yield self.buf[i]
+        self.buf[:] = 0
+    
+
+
+
+
+
+        
+#amps
+def slew_budget_amp(maxp=1000,recharge_rate=.05):
+    def do(v,a=[maxp,0]):
+        d = v-a[1]
+        dm = abs(d)
+        if dm > a[0]:
+            dd = d/dm
+            v = a[1]+dd*a[0]
+            a[0] = 0
+        else:
+            a[0] -= dm
+        a[0] = min(maxp,a[0]+recharge_rate)
+        a[1] = v
+        return v
+    return do
+
+def tanh_fraction_slew_amp(k=1):
+    def do(v,a=[0]):
+        d = v-a[0]
+        dm = abs(d)
+        frac = math.tanh(k*dm)
+        d *= frac
+        v = a[0]+d
+        a[0] = v
+        return v
+    return do
+
+#lowpasses when k*s < 1
+#sounds funky and phasey when k*s > 1
+def tanh_slew_amp(k=1,s=1):
+    def do(v,a=[0]):
+        d = v-a[0]
+        dm = abs(d)
+        amount = math.tanh(k*dm)*s
+        if dm != 0:
+            d *= amount/dm
+        v = a[0]+d
+        a[0] = v
+        return v
+    return do
+
+def stutterPlayback(g,p=0xc000,l=64):
+ s = 1
+ c = 0
+ for v in g:
+  if c <= 0:
+   c = l
+   s = (s>>1)^((s&1)*p)
+  yield v
+  c -= 1
+  if s&1:
+   yield v
+   c -= 1
+
+
+
+
+
+
+def gTaps(gen,tap_speed = 1,progress_speed = 1,buflen = 4096,bufOverLen=4800000,wf = lambda x:.5+.5*math.cos(2*math.pi*x)):
+    buf = [0]*buflen
+    bufi = 0
+    ps = genify(progress_speed)
+    ts = genify(tap_speed)
+    tapp = 0
+    p = 0
+    while 1:
+        tapp += next(ts)
+        dp = next(ps)
+        p += dp
+        while int(p) > 0:
+            if bufi == len(buf):
+                buf += [next(gen)]
+            else:
+                buf[bufi] = next(gen)
+            bufi = (bufi+1)%bufOverLen
+            tapp -= 1
+            p -= 1
+        
+        tapp %= buflen//2
+        vtapp = (int(tapp)-int(p))%(buflen//2)
+        weight = wf(tapp/buflen)
+        yield buf[(vtapp+bufi+int(p)-buflen)%len(buf)]*(1-weight)+\
+            buf[(vtapp+bufi+int(p)-buflen//2)%len(buf)]*weight
+
+class relay:
+    def __init__(self,source=0):
+        self.source = source
+    def __next__(self):
+        try:
+            return next(self.source)
+        except:
+            return self.source
+
+def loopback(cont):
+    v = [0]
+    def loop(v=v):
+        while 1:
+            yield v[0]
+    gen = cont(loop())
+    for r in gen:
+        v[0] = r
+        yield r
+#eg: loopback(lambda l,f=filt.iir1l(-.99999,10,-10): gTaps(ll.play(),1,(1-f(abs(v)) for v in l),1<<12))
+
+
+
+
+
+def squishWave(wave,n=1000,span=lambda w:np.max(w.view(float))-np.min(w.view(float))):
+    wave = np.array(wave,dtype=complex)
+    ftr = np.fft.rfft(wave.real)
+    fti = np.fft.rfft(wave.imag)
+    #for stereo, restrict the real and imag components to have the same relative phase
+    # and also, the amplitudes must be the same
+    best = wave
+    bestS = span(best)
+    l = len(wave)
+    pert = ftr.copy()
+    pv = pert.view(float)
+    #print(ftr,fti)
+    for i in range(n):
+        pv[:] = np.random.normal(0,1,pv.shape)
+        pert[0] = pert[0].real
+        pert[-1] = pert[-1].real
+        pert /= np.abs(pert)
+        #print(pert,np.abs(pert))
+        #pert[-1:l//2:-1] = pert[1:l//2].conjugate()
+        guess = np.fft.irfft(ftr*pert)+1j*np.fft.irfft(fti*pert)
+        if (s:=span(guess)) <= bestS:
+            bestS = s
+            best = guess
+        #print(s,"    ",end="\r")
+    #print("")
+    return best
+def scrambleWave(wave):
+    return squishWave(wave,1,lambda x:1)
+def detuneWave(wave,detune=-1,mult=16):
+    ft = np.fft.fft(wave)
+    rft = np.zeros(len(ft)*mult,dtype=complex)
+    d = mult+detune
+    hl = len(ft)//2
+    rft[:d*hl:d] = ft[:hl]*mult
+    rft[1-d*hl::d] = ft[hl:]*mult
+    return np.fft.ifft(rft)
+def chirp_r_wave(wave,s=0):
+    ft = np.fft.rfft(wave)
+    r = [ft[0]]
+    for i in range(1,len(ft)):
+        r += [0]*(i+s)
+        r += [ft[i]]
+    return np.fft.irfft(r)*len(r)/len(ft)
+def rchirp_r_wave(wave,s=0):
+    ft = np.fft.rfft(wave)
+    r = [ft[0]]
+    for i in range(1,len(ft)):
+        r += [0]*(len(ft)-1-i+s)
+        r += [ft[i]]
+    return np.fft.irfft(r)*len(r)/len(ft)
+def harm_distort_plot(wave):
+    fft = np.fft.rfft(wave)
+    linear = np.arange(len(fft))/len(fft)
+    quad = linear*linear
+    cubic = quad*linear
+    import matplotlib.pyplot as plt
+    from matplotlib.widgets import Slider
+    plt.figure()
+    axp = plt.axes([0.05, 0.15, .9, .8])
+    axl = plt.axes([0.1, 0.025, .8, .025])
+    axq = plt.axes([0.1, 0.05, .8, .025])
+    axc = plt.axes([0.1, 0.10, .8, .025])
+    sl = Slider(axl, 'linear shift', -5, 5, valinit=0)
+    sq = Slider(axq, 'quadratic shift', -50, 50, valinit=0)
+    sc = Slider(axc, 'cubic shift', -500, 500, valinit=0)
+    terms = [0,0,0]
+    lineplot, = axp.plot(np.arange(len(wave)),np.array(wave))
+    def replot():
+        lineplot.set_ydata(np.fft.irfft(np.exp((terms[0]*linear+terms[1]*quad+terms[2]*cubic)*1j)*fft))
+    def update(i,s,ngc=[]):
+        def do(val,i=i,sld=s):
+            terms[i] = sld.val*len(wave)
+            replot()
+        ngc += [do]
+        return do
+    sl.on_changed(update(0,sl))
+    sq.on_changed(update(1,sq))
+    sc.on_changed(update(2,sc))
+    plt.show(block=0)
+    return [plt,update,replot]
+
+
+
+#do Energy transfer filters? https://core.ac.uk/reader/9556830

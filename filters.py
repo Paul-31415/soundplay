@@ -609,6 +609,10 @@ def iirIA(l=3,plotN = 1<<8,ms=.5):#interactive iir filter arrays
     ppdat, = plt.plot([abs(10*i) for i in x[plotN:]], [0]*plotN,"o", ms=ms)
     pndat, = plt.plot([abs(10*i) for i in x[:plotN]], [0]*plotN,"o", ms=ms)
     r = response(B,A)
+
+    rax = plt.axes([0.05, 0.4, 0.1, 0.15])
+    cbs = CheckButtons(rax, ["pair","logf","quad","literal"], [True,False,False,False])
+    
     def fmap(x):
         if x<0:
             return -fmap(-x)
@@ -625,8 +629,12 @@ def iirIA(l=3,plotN = 1<<8,ms=.5):#interactive iir filter arrays
         return [a[0]/f,a[1]/f]
     def amap(x,y):
         g = lambda x: 3*(x+x**11)
+        if cbs.get_status()[3]:
+            return nrm([1,-cmap(x,-y)])
         return nrm([1,-cmap(x,(2*(y<0)-1)*math.tanh(g(max(abs(y*2)-.125,0)/(2.5-.25))))])
     def bmap(x,y):
+        if cbs.get_status()[3]:
+            return nrm([1,-cmap(x,-y)])
         return nrm([1,-cmap(x,max(0,math.tanh(min(4,4*(1.125-abs(y/2))))/math.tanh(4))*(2*(y<0)-1))])
     def calcTerms():
         a = Polynomial([cmap(*drs[1].point.center)])
@@ -638,8 +646,6 @@ def iirIA(l=3,plotN = 1<<8,ms=.5):#interactive iir filter arrays
             A[i] = a[i]
             B[i] = b[i]
 
-    rax = plt.axes([0.05, 0.4, 0.1, 0.15])
-    cbs = CheckButtons(rax, ["pair","logf","quad"], [True,False,False])
     
     def move(dr):
         if dr.dat > 1:

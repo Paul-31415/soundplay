@@ -1,0 +1,9 @@
+python3.9 -m pip install pyaudio
+python3.9 -m pip install numpy
+python3.9 -m pip install scipy
+python3.9 -m pip install audioread
+python3.9 -m pip install struct
+python3.9 -m pip install matplotlib
+python3.9 -m pip install scikit-learn
+python3.9 -m pip install pywavelets
+python3.9 -m pip install sortednp

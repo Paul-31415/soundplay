@@ -129,8 +129,7 @@ def integ(g,a=1):
         yield v
 
 from audioOut import float_out,alaw_out,mono
-from pitch import *
-from matplotThings import live_graph,graph
+from matplotThings import live_graph,graph,grapha,plotimgs
 import matplotThings as mpt
 from voice import *
 import components as q
@@ -144,3 +143,46 @@ def sampgen(samp,g,t=6000):
         for _ in range(t):
             yield samp[int(i)]
             i = (i+f)%len(samp)
+
+
+print("""
+res = []
+def savetee(g):
+    global res
+    for v in g:
+        res += [v]
+        yield v
+""")
+import pitch
+import fft_knn_song_combine as fksc
+import scipy as sp
+def out(a,n):
+    if len(a) > 4000000:
+        rres = sp.signal.resample(a,4000000)
+    else:
+        rres = np.array(a)
+    alaw_out(rres*32/max(np.max(np.abs(rres.real)),np.max(np.abs(rres.imag))),n,rate=(len(rres)*48000)//len(a))
+
+
+z = c([])
+print("""
+def spause(a=[z,z]):
+    global mix
+    if mix.out != a[1] and a[1] != a[0]:
+        a[0] = a[1]
+    mix.out,a[0] = a[0],mix.out
+""")
+import pitch
+
+
+def drum(s=100,d=.999,n=0):
+    while 1:
+        yield math.sin(s+n*s*random.random())*(1+1j)
+        s *= d
+def tryi(it):
+    try:
+        yield from it
+    except:
+        pass
+    
+print(">>> from a import *")

@@ -1,3 +1,5 @@
+#python3.9
+
 """make a tone"""
 
 help_message = """stereo
@@ -115,6 +117,33 @@ class OA:
 def help():
     print(help_message)
 
+
+class ringbuffer:
+    def __init__(self,l):
+        self.buf = np.zeros(l,dtype=complex)
+        self.ri = 0
+        self.wi = 0
+    def write(self,v):
+        try:
+            wl = len(v)
+        except:
+            self.buf[self.wi] = v
+            self.wi = (self.wi+1)%len(self.buf)
+            return
+        self.buf[self.wi:self.wi+wl] = v
+        if (i:=(self.wi+wl - len(self.buf))) > 0:
+            self.buf[0:i] = v[-i:]
+        self.wi = (self.wi+wl)%len(self.buf)
+    def __next__(self):
+        v = self.buf[self.ri]
+        self.ri = (self.ri+1)%len(self.buf)
+        return v
+    def __iter__(self):
+        return self
+    def seek(self,pos):
+        self.ri = (self.wi-pos)%len(self.buf)
+        return self
+    
 def main(argv):
     #wf = wave.open(argv[1], 'rb')
     depth = 2
@@ -128,11 +157,15 @@ def main(argv):
     #mix.compress = 1
     mix.hardMax = 2
     mix.rate = 48000
+    mix.mic = ringbuffer(1<<16)
+    mix.mica = np.zeros(0)
     adapter = OA(depth)
     __oldSampleRate = mix.rate
     # define callback (2)
     def callback(in_data, frame_count, time_info, status):
         #data = wf.readframes(frame_count)
+        mix.mica = np.frombuffer(in_data,dtype=np.complex64)
+        mix.mic.write(mix.mica)
         try:
             try:
                 mix.out = iter(mix.out)
@@ -154,6 +187,7 @@ def main(argv):
                     channels=2,
                     rate=mix.rate,
                     output=True,
+                    input=True,
                     stream_callback=callback)
 
     def update():
@@ -168,6 +202,7 @@ def main(argv):
                             channels=2,
                             rate=int(mix.rate),
                             output=True,
+                            input=True,
                             stream_callback=callback)
             stream.start_stream()
     def pause():

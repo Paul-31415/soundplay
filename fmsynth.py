@@ -1,4 +1,5 @@
 
+
 from itools import lmbdWr,lm
 
 import itertools
@@ -56,6 +57,16 @@ lsin = lm(nsin)
 lsaw = lm(nsaw)
 ltri = lm(ntri)
 lsqr = lm(nsquare)
+
+def pulse(w=.5):
+    def p(v):
+        return ((v%1)<w)*2-1
+    return p
+def tri(w=.5):
+    def t(v):
+        v %= 1
+        return 2*v/w-1 if v < w else 2*(w-v)/(1-w)+1
+    return t
 
 _reserved = []
 def polyvars(varstr):
@@ -562,7 +573,7 @@ class PiecewizePoly:
         numerator=int(round(numerator/d))
         denominator=int(round(denominator/d))
         return [self.bandLimit(numerator*i*self.mod/denominator,int(denominator/numerator/fnd),neg) for i in range(numerator*denominator)]
-
+    
     def bandConj(self,t,bl=5):
         tot = 0
         re = self.real()
@@ -586,7 +597,51 @@ class PiecewizePoly:
             if 0<=int(v.real*w*2)<w*2 and 0<=int(v.imag*h*4) < h*4:
                 gr.brailleScreenSet(scrn,int(v.real*w*2),int(v.imag*h*4))
         gr.brailleScreenPrint(scrn)
+
+def forever(v):
+    while 1:
+        yield v
+#NEW BWLSYNTH IDEA:
+#    sample the nth integral then derivitate the signal n times
+#     the high harmonics are suppressed in the integrals which means
+#     when they alias they are tiny
+#     but the reconstruction filter doesn't amplify them a ton because they were aliased
+#     thus cheap and easy bwl synthesis
+def idbwlPoly(p,rate=440/48000,q=1,d=1):
+    try:
+        rate.__next__
+    except:
+        rate = forever(rate)
+    ds = [[0]*d for i in range(q)]
+    rates = [0]*d
+    trate = 0
+    for i in range(q):
+        p = p.unbiased().integ()
+    t = 0
+    di = 0
+    for i in range(q*d):
+        di = (di+1)%d
+        t += rate
+        t %= 1
+        r = p(t)
+        trate -= rates[di]
+        rates[di] = next(rate)
+        trate += rates[di]
+        for i in range(q):
+            r,ds[i][di] = (r-ds[i][di]) / trate,r
+    while 1:
+        di = (di+1)%d
+        t += rate
+        t %= 1
+        r = p(t)
+        trate -= rates[di]
+        rates[di] = next(rate)
+        trate += rates[di]
+        for i in range(q):
+            r,ds[i][di] = (r-ds[i][di]) / trate,r
+        yield r
         
+
 def ditherPoly(p,rate=440/48000,dd=1):
     from random import random
     t = 0
@@ -877,3 +932,9 @@ def stereoDecode(g,c=15000,sr=48000):
     for i in g:
         r = 
 """
+
+
+
+
+
+#def fm(

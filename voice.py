@@ -184,3 +184,6 @@ def f0(freq,duty=.22,noise=.2):
     for a in f:
         p = (p+a)%1
         yield 1+1j+(random()+1j*random())*next(n) if p < next(d) else 0
+
+
+# http://www.rothenberg.org/Glottal/Glottalprinterfriendly.htm

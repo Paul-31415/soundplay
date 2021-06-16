@@ -12,6 +12,15 @@ def graph(func,xm=-10,xM=10,res=1000):
     t = lambda x: x/(res-1)*(xM-xm)+xm
     ax.plot([t(i) for i in range(res)],[func(t(i)) for i in range(res)])
     plt.show(block=0)
+def grapha(a,x=None,s='-'):
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(nrows=1, ncols=1)
+    if not np.all(a.imag==0):
+        a = np.array([a.real,a.imag]).T
+    if x is None:
+        x = np.arange(len(a))
+    ax.plot(x,a,s)
+    plt.show(block=0)
 
     
 def live_graph(dfuncs=()):
@@ -307,3 +316,27 @@ plt.show()
 
 
     
+def complex_to_color(c):
+    L = np.abs(c)
+    a = c.real
+    b = c.imag
+    
+    return np.array([L+a/2 + b/4,L-a/2 + b/4,L-np.abs(a)/4 - b/2])
+def plotimgs(*imgs):
+    import matplotlib.pyplot as plt
+    fig, axs = plt.subplots(nrows=len(imgs), ncols=1)
+    try:
+        axs[0]
+    except:
+        axs = [axs]
+    for i in range(len(imgs)):
+        im = imgs[i]
+        if len(im.shape) == 2:
+            try:
+                axs[i].imshow(im,aspect='auto')
+            except:
+                im = np.transpose(complex_to_color(im),(1,2,0))
+                axs[i].imshow(im,aspect='auto')
+        else:
+            axs[i].imshow(im,aspect='auto')
+    plt.show(block=0)
